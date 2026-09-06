@@ -2,7 +2,9 @@
 
 BiliFrame 是面向桌面端哔哩哔哩 HTML5 播放器的 Tampermonkey 用户脚本，为视频观看增加逐帧控制、当前帧截图和原始封面查看功能。
 
-项目名为 **BiliFrame**，仓库名为 `biliframe`，当前版本为 `0.1.2`。项目目前尚未发布到 GitHub；本文中的本地安装方式适用于开发和测试阶段。
+> 本项目主要由 GPT 完成，并经过人工审查。
+
+项目名为 **BiliFrame**，仓库名为 `biliframe`，当前版本为 `0.1.2`。源代码与发行版发布于 [Celesrain/biliframe](https://github.com/Celesrain/biliframe)。
 
 ## 功能
 
@@ -28,18 +30,20 @@ BiliFrame 是面向桌面端哔哩哔哩 HTML5 播放器的 Tampermonkey 用户�
 
 ## 安装与更新
 
-### 本地安装
+### 从 GitHub 安装
 
 1. 安装并打开兼容 Tampermonkey 的用户脚本管理器。
-2. 在本项目中找到 [`src/biliframe.user.js`](src/biliframe.user.js)，将文件拖入管理器，或在管理器中使用“从文件安装”。
+2. 打开最新 Release 中的 `biliframe.user.js` 附件，或直接打开 [`src/biliframe.user.js`](https://raw.githubusercontent.com/Celesrain/biliframe/main/src/biliframe.user.js)。
 3. 检查脚本名称、匹配范围和权限后确认安装。
 4. 打开或刷新支持的哔哩哔哩视频页面。
+
+开发者也可将仓库中的 [`src/biliframe.user.js`](src/biliframe.user.js) 拖入管理器，或在管理器中使用“从文件安装”。
 
 脚本文件是可直接安装的单文件 userscript，不需要先构建，也不需要安装运行时依赖。
 
 ### 更新
 
-开发阶段重新下载或替换 `src/biliframe.user.js` 后，在脚本管理器中重新导入；若管理器提示同名脚本，选择更新现有脚本。未来若通过 GitHub 发布，可使用发布方提供的 raw 文件地址更新，但当前项目尚未发布 GitHub，因此不要使用未提供的在线地址。
+从最新 GitHub Release 或 raw 文件地址重新打开脚本；若管理器提示同名脚本，选择更新现有脚本。脚本的 `@version` 会随发布版本递增。
 
 ## 按钮与快捷键
 
@@ -73,7 +77,7 @@ BiliFrame 不包含统计、遥测、Cookie、账号数据或后台网络请求�
 - 浏览器未提供统一的反向解码接口，逐帧后退是基于媒体时间线的定位近似。
 - 跨域或受保护的视频画布可能无法导出截图；脚本会显示错误而不是静默失败。
 - 没有可用原始封面时，封面按钮无法完成预览；下载器不支持时可改用浏览器打开原图后另存。
-- 不自动安装 Tampermonkey 或本脚本，也不负责创建或推送 GitHub 仓库。
+- 不自动安装 Tampermonkey 或本脚本。
 
 ## 故障排查
 
