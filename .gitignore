@@ -1,0 +1,21 @@
+# Dependencies and package-manager state
+node_modules/
+
+# Test and coverage output
+coverage/
+.nyc_output/
+
+# Generated and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Local editor and operating-system metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
