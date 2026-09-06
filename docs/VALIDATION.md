@@ -8,7 +8,7 @@
 - [x] `npm test`；日期：2026-09-06；结果：通过，40/40 测试通过，0 失败。
 - [x] `npm run verify`；日期：2026-09-06；结果：通过；依次完成 `npm run check` 与 `npm test`，40/40 测试通过。
 - [x] `git add -N -- .; git diff --check; git reset -- .`；日期：2026-09-06；结果：通过；包含未跟踪新增文件的 diff 检查无空白错误，随后已安全取消暂存且未丢弃改动。
-- [x] 用户脚本元数据；日期：2026-09-06；结果：通过；`@name` 为 `BiliFrame - 哔哩哔哩逐帧与截图工具`，namespace 为 `https://github.com/Celesrain/biliframe`，version 为 `0.1.1`，author 为 `Celesrain`，license 为 `MIT`；恰有 5 个 desktop `@match`（video、bangumi/play、medialist/play、list/watchlater、festival），恰有 3 个 grants（`GM_download`、`GM_openInTab`、`GM_setClipboard`），恰有 `@connect hdslb.com`，`@run-at` 为 `document-start`。
+- [x] 用户脚本元数据；日期：2026-09-06；结果：通过；`@name` 为 `BiliFrame - 哔哩哔哩逐帧与截图工具`，namespace 为 `https://github.com/Celesrain/biliframe`，version 为 `0.1.2`，author 为 `Celesrain`，license 为 `MIT`；恰有 5 个 desktop `@match`（video、bangumi/play、medialist/play、list/watchlater、festival），恰有 3 个 grants（`GM_download`、`GM_openInTab`、`GM_setClipboard`），恰有 `@connect hdslb.com`，`@run-at` 为 `document-start`。
 - [x] 风险关键词与选择器审计；日期：2026-09-06；结果：通过；在 `src/` 中未发现 `fetch`、`XMLHttpRequest`、`WebSocket`、`sendBeacon`、analytics/telemetry、cookie、localStorage、unsafeWindow、`eval`、TODO/FIXME；仅有预期的 `GM_*` 用户触发适配器。样式规则均使用 `bili-frame-` 命名空间；播放器/媒体查询使用 DESIGN 记录的原生选择器。未发现宽泛 `@connect`。
 
 自动化边界：上述检查覆盖 Node 语法、Node/UI 集成测试、用户脚本元数据、静态网络/全局/样式审计；未安装或执行用户脚本，也未验证真实浏览器、Bilibili 页面、Tampermonkey API 或 live DOM。
@@ -90,3 +90,14 @@
 - [x] 本地浏览器视觉检查；结果：通过；在 in-app 浏览器的 Bilibili 风格测试页中确认四按钮排列清楚；截图预览显示 `1280×720` 示例画面及“下载截图”“复制当前时间链接”“关闭”，封面预览显示原图及“下载原图”“打开原图”“复制图片地址”“关闭”。
 
 验证边界：本节视觉检查使用加载真实 userscript 源码的本地测试页，不是 Tampermonkey 在真实 Bilibili 页中的运行时 E2E；实际用户脚本安装、GM API 和 live SPA 重挂载仍须按第 4 节验收。
+
+## 9. v0.1.2 弹窗与用户脚本 API 修复（2026-09-06）
+
+- [x] 回归测试先行；结果：旧实现新增 5 项失败，分别覆盖普通 DOM 弹层、缺少 `showModal`、预览内无操作反馈、沙箱 API 未显式桥接及全屏样式缺少 `::backdrop`。
+- [x] 用户脚本 API 桥接；结果：通过；bootstrap 显式捕获已授权的三个 `GM_*` 函数并传给生命周期适配器，不依赖页面 `window` 是否暴露它们。
+- [x] 操作参数；结果：通过；“打开原图”请求 active child tab，剪贴板明确使用 `text` 类型；下载配置 `onload`、`onerror`、`ontimeout` 并显示具体结果。
+- [x] Node/UI 集成；结果：通过；30/30 UI 测试通过，包括显式 grants 的下载、打开和复制调用。
+- [x] `npm run verify`；结果：通过；语法检查与完整测试套件均通过，43/43 测试通过，0 失败。
+- [x] 原生全屏视觉检查；结果：通过；本地页先调用 `requestFullscreen()`，随后真实源码通过 `<dialog>.showModal()` 在顶层显示 `1280×720` 图像、文件名、下载/复制/关闭按钮；点击模拟复制后，预览内显示“已复制当前时间链接”。
+
+验证边界：全屏视觉检查确认浏览器顶层和界面反馈，不执行真实下载或剪贴板写入；Tampermonkey 授权 API 的真实现场行为仍属于第 4 节验收范围。

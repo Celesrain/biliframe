@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BiliFrame - 哔哩哔哩逐帧与截图工具
 // @namespace    https://github.com/Celesrain/biliframe
-// @version      0.1.1
+// @version      0.1.2
 // @description  为哔哩哔哩播放器添加逐帧前进/后退、当前帧截图和原始封面查看下载功能。
 // @author       Celesrain
 // @license      MIT
@@ -20,6 +20,11 @@
 (function startBiliFrame(root, factory) {
   'use strict';
 
+  const userscriptApis = {
+    GM_download: typeof GM_download === 'function' ? GM_download : undefined,
+    GM_openInTab: typeof GM_openInTab === 'function' ? GM_openInTab : undefined,
+    GM_setClipboard: typeof GM_setClipboard === 'function' ? GM_setClipboard : undefined,
+  };
   const api = factory();
 
   if (typeof module === 'object' && module.exports) {
@@ -27,7 +32,7 @@
     return;
   }
 
-  api.bootstrap(root);
+  api.bootstrap(root, { userscriptApis });
 })(typeof globalThis === 'object' ? globalThis : this, function createBiliFrame() {
   'use strict';
 
@@ -431,6 +436,11 @@
     const close = () => {
       if (!state?.modal) return;
       const opener = state.opener;
+      try {
+        if (typeof state.modal.close === 'function') state.modal.close();
+      } catch {
+        // Removing the node below is the fallback for a dialog that is not open.
+      }
       if (state.modal.parentNode) state.modal.parentNode.removeChild(state.modal);
       state.modal = null;
       state.opener = null;
@@ -445,7 +455,7 @@
       if (!coverUrl || !document?.body) return null;
       if (state?.modal) close();
 
-      const modal = document.createElement('div');
+      const modal = document.createElement('dialog');
       modal.className = 'bili-frame-modal';
       modal.setAttribute('role', 'dialog');
       modal.setAttribute(
@@ -471,6 +481,21 @@
       content.className = 'bili-frame-modal-content';
       content.append(image, filenameNode);
 
+      const feedback = document.createElement('div');
+      feedback.className = 'bili-frame-modal-feedback';
+      feedback.setAttribute('data-bili-frame-modal-feedback', 'true');
+      feedback.setAttribute('role', 'status');
+      feedback.setAttribute('aria-live', 'polite');
+      feedback.hidden = true;
+      const showFeedback = (status) => {
+        if (!status || typeof status !== 'object') return status;
+        const success = status.ok !== false;
+        feedback.className = `bili-frame-modal-feedback ${success ? 'bili-frame-modal-feedback-success' : 'bili-frame-modal-feedback-error'}`;
+        feedback.textContent = status.message || (success ? '操作已完成' : '操作失败');
+        feedback.hidden = false;
+        return status;
+      };
+
       const makeAction = (name, label, callback) => {
         const button = document.createElement('button');
         button.className = `bili-frame-modal-action bili-frame-modal-${name}`;
@@ -483,7 +508,16 @@
           if (name === 'close') {
             close();
           } else if (typeof callback === 'function') {
-            callback(coverUrl, filename);
+            try {
+              const result = callback(coverUrl, filename, showFeedback);
+              if (result && typeof result.then === 'function') {
+                result.then(showFeedback, () => showFeedback({ ok: false, message: '操作失败，请重试' }));
+              } else {
+                showFeedback(result);
+              }
+            } catch {
+              showFeedback({ ok: false, message: '操作失败，请重试' });
+            }
           }
         });
         return button;
@@ -501,7 +535,7 @@
         ...actionItems.map((item) => makeAction(item.name, item.label, item.callback)),
         makeAction('close', '关闭', null),
       );
-      modal.append(content, buttons);
+      modal.append(content, buttons, feedback);
       modal.addEventListener('click', (event) => {
         if (event.target === modal) close();
       });
@@ -511,6 +545,15 @@
       state = { modal, opener };
       coverModalStates.set(document, state);
       document.body.appendChild(modal);
+      if (typeof modal.showModal === 'function') {
+        try {
+          modal.showModal();
+        } catch {
+          modal.setAttribute('open', '');
+        }
+      } else {
+        modal.setAttribute('open', '');
+      }
       buttons.querySelector?.('[data-bili-frame-modal-action]')?.focus?.();
       return modal;
     };
@@ -518,11 +561,15 @@
     return { open, close, getModal: () => state?.modal || null };
   }
 
-  function createUserscriptAdapters(root = {}) {
+  function createUserscriptAdapters(root = {}, userscriptApis = {}) {
+    const resolveApi = (name) => (
+      typeof userscriptApis[name] === 'function' ? userscriptApis[name] : root[name]
+    );
     const call = (name, args) => {
-      if (typeof root[name] !== 'function') return false;
+      const api = resolveApi(name);
+      if (typeof api !== 'function') return false;
       try {
-        root[name](...args);
+        api(...args);
         return true;
       } catch {
         return false;
@@ -530,8 +577,8 @@
     };
     return {
       download: (details) => call('GM_download', [details]),
-      open: (url) => call('GM_openInTab', [url]),
-      copy: (text) => call('GM_setClipboard', [text]),
+      open: (url) => call('GM_openInTab', [url, { active: true, insert: true, setParent: true }]),
+      copy: (text) => call('GM_setClipboard', [text, 'text']),
     };
   }
 
@@ -610,11 +657,54 @@
     const getDocument = () => options.document || getVideo()?.ownerDocument;
     const report = typeof options.onStatus === 'function' ? options.onStatus : () => {};
 
-    const adapterAction = (name, argument, successMessage, failureReason) => {
+    const adapterAction = (name, argument, successMessage, failureReason, failureMessage) => {
       const ok = Boolean(adapters[name]?.(argument));
       const status = ok
         ? { ok: true, type: name, message: successMessage }
-        : { ok: false, reason: failureReason, message: `无法完成：${successMessage}` };
+        : { ok: false, reason: failureReason, message: failureMessage || '操作未能完成，请重试' };
+      report(status);
+      return status;
+    };
+
+    const downloadAction = (details, label, showFeedback) => {
+      const publishAsync = (status) => {
+        report(status);
+        showFeedback?.(status);
+        return status;
+      };
+      const explainFailure = (event) => {
+        const reason = event?.error || event?.details || 'not_succeeded';
+        const explanations = {
+          not_enabled: '下载功能未启用',
+          not_whitelisted: '文件扩展名未获允许',
+          not_permitted: '浏览器未授予下载权限',
+          not_supported: '当前浏览器不支持该下载方式',
+          not_succeeded: '下载未能完成',
+        };
+        return explanations[reason] || String(reason);
+      };
+      const request = {
+        ...details,
+        onload: () => publishAsync({
+          ok: true,
+          type: 'download-complete',
+          message: `${label}已保存`,
+        }),
+        onerror: (event) => publishAsync({
+          ok: false,
+          reason: 'download-failed',
+          message: `${label}下载失败：${explainFailure(event)}`,
+        }),
+        ontimeout: (event) => publishAsync({
+          ok: false,
+          reason: 'download-timeout',
+          message: `${label}下载失败：${explainFailure(event)}`,
+        }),
+      };
+      const started = Boolean(adapters.download?.(request));
+      const status = started
+        ? { ok: true, type: 'download-requested', message: `已请求下载${label}` }
+        : { ok: false, reason: 'download-failed', message: `${label}下载未能启动` };
       report(status);
       return status;
     };
@@ -644,11 +734,10 @@
             {
               name: 'download',
               label: '下载截图',
-              callback: (url, filename) => adapterAction(
-                'download',
+              callback: (url, filename, showFeedback) => downloadAction(
                 { url, name: filename, saveAs: true },
-                '已请求下载截图',
-                'download-failed',
+                '截图',
+                showFeedback,
               ),
             },
             {
@@ -695,17 +784,16 @@
           title: options.title,
           filename,
           actions: {
-            download: (imageUrl, imageFilename) => adapterAction(
-              'download',
+            download: (imageUrl, imageFilename, showFeedback) => downloadAction(
               { url: imageUrl, name: imageFilename, saveAs: true },
-              '已请求下载视频封面',
-              'download-failed',
+              '视频封面',
+              showFeedback,
             ),
             open: (imageUrl) => adapterAction(
-              'open', imageUrl, '已打开视频封面', 'open-failed',
+              'open', imageUrl, '已打开视频封面', 'open-failed', '无法打开视频封面',
             ),
             copy: (imageUrl) => adapterAction(
-              'copy', imageUrl, '已复制封面地址', 'clipboard-failed',
+              'copy', imageUrl, '已复制封面地址', 'clipboard-failed', '无法复制封面地址',
             ),
           },
         });
@@ -742,10 +830,16 @@
 .bili-frame-icon { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.35; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
 .bili-frame-status { position:fixed; z-index:2147483646; right:16px; bottom:64px; max-width: min(360px, calc(100vw - 32px)); padding:6px 10px; border-radius:999px; color:#fff; background:rgba(20,20,24,.88); font:12px/1.4 sans-serif; pointer-events:none; }
 .bili-frame-status-success { background:rgba(24,120,70,.92); } .bili-frame-status-error { background:rgba(170,45,45,.94); }
-.bili-frame-modal { position:fixed; inset:0; z-index:2147483645; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; background:rgba(0,0,0,.72); color:#fff; }
+.bili-frame-modal { position:fixed; inset:0; z-index:2147483645; box-sizing:border-box; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100vw; max-width:none; height:100vh; max-height:none; margin:0; padding:24px; border:0; background:rgba(0,0,0,.72); color:#fff; }
+.bili-frame-modal:not([open]) { display:none; }
+.bili-frame-modal::backdrop { background:rgba(0,0,0,.72); }
 .bili-frame-modal-content { max-width:min(92vw,1200px); max-height:82vh; overflow:auto; text-align:center; background:rgba(24,24,28,.96); padding:16px; border-radius:8px; }
 .bili-frame-modal-image { display:block; max-width:100%; max-height:68vh; object-fit:contain; }
 .bili-frame-modal-filename { margin-top:8px; overflow-wrap:anywhere; } .bili-frame-modal-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:12px; padding:10px 12px; border-radius:8px; background:rgba(24,24,28,.96); }
+.bili-frame-modal-feedback { min-height:20px; margin-top:8px; padding:6px 10px; border-radius:6px; color:#fff; background:rgba(24,24,28,.96); font:13px/1.4 sans-serif; }
+.bili-frame-modal-feedback[hidden] { display:none; }
+.bili-frame-modal-feedback-success { background:rgba(24,120,70,.94); }
+.bili-frame-modal-feedback-error { background:rgba(170,45,45,.96); }
 .bili-frame-modal-action { min-height:32px; padding:6px 12px; border:1px solid rgba(255,255,255,.35); border-radius:4px; color:#fff; background:rgba(255,255,255,.1); cursor:pointer; }
 .bili-frame-modal-action:hover, .bili-frame-modal-action:focus-visible { background:rgba(255,255,255,.22); outline:2px solid currentColor; outline-offset:2px; }
 @media (max-width:560px) { .bili-frame-control { width:30px; min-width:30px; } .bili-frame-icon { width:20px; height:20px; } .bili-frame-modal { padding:12px; } }
@@ -835,7 +929,7 @@
       }
       const mediaActions = createMediaActions({
         ...options,
-        adapters: options.adapters || createUserscriptAdapters(root),
+        adapters: options.adapters || createUserscriptAdapters(root, options.userscriptApis),
         document,
         video,
         pageUrl: options.pageUrl || root.location?.href || '',
@@ -929,8 +1023,8 @@
     return { start, schedule, ensure, destroy, getMounted: () => mounted, getActiveVideo: () => activeVideo };
   }
 
-  function bootstrap() {
-    const controller = createLifecycleController(arguments[0]);
+  function bootstrap(root, options = {}) {
+    const controller = createLifecycleController(root, options);
     controller.start();
     return controller;
   }

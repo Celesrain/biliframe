@@ -215,6 +215,19 @@ test('cover resolution follows metadata priority and normalizes the selected URL
 
 test('cover modal is a replaceable singleton with injected actions and focus restore', () => {
   const { document } = createDom();
+  let showModalCalls = 0;
+  const createElement = document.createElement.bind(document);
+  document.createElement = (tagName) => {
+    const element = createElement(tagName);
+    if (tagName === 'dialog') {
+      element.showModal = () => {
+        assert.equal(element.isConnected, true);
+        showModalCalls += 1;
+        element.setAttribute('open', '');
+      };
+    }
+    return element;
+  };
   const opener = document.createElement('button');
   document.body.appendChild(opener);
   const calls = [];
@@ -227,6 +240,8 @@ test('cover modal is a replaceable singleton with injected actions and focus res
     },
   });
   const first = modalApi.open('https://i0.hdslb.com/bfs/archive/cover.png@672w', opener);
+  assert.equal(first.tagName, 'DIALOG');
+  assert.equal(showModalCalls, 1);
   assert.equal(document.body.querySelectorAll('[data-bili-frame-modal="cover"]').length, 1);
   const buttons = first.querySelectorAll('[data-bili-frame-modal-action]');
   buttons[0].click();
@@ -235,6 +250,7 @@ test('cover modal is a replaceable singleton with injected actions and focus res
   assert.equal(calls.length, 3);
   const second = modalApi.open('https://i0.hdslb.com/bfs/archive/other.jpg', opener);
   assert.notEqual(first, second);
+  assert.equal(showModalCalls, 2);
   assert.equal(document.body.querySelectorAll('[data-bili-frame-modal="cover"]').length, 1);
   second.dispatchEvent(new FakeEvent('keydown', { key: 'Escape', bubbles: true }));
   assert.equal(document.body.querySelectorAll('[data-bili-frame-modal="cover"]').length, 0);
@@ -268,16 +284,16 @@ test('userscript adapters invoke each GM capability, with false fallbacks for mi
   const calls = [];
   const adapters = createUserscriptAdapters({
     GM_download: (details) => calls.push(['download', details]),
-    GM_openInTab: (url) => calls.push(['open', url]),
-    GM_setClipboard: (text) => calls.push(['copy', text]),
+    GM_openInTab: (url, options) => calls.push(['open', url, options]),
+    GM_setClipboard: (text, type) => calls.push(['copy', text, type]),
   });
   assert.equal(adapters.download({ url: 'data:x', name: 'x.png' }), true);
   assert.equal(adapters.open('https://example.test/cover.png'), true);
   assert.equal(adapters.copy('copied text'), true);
   assert.deepEqual(calls, [
     ['download', { url: 'data:x', name: 'x.png' }],
-    ['open', 'https://example.test/cover.png'],
-    ['copy', 'copied text'],
+    ['open', 'https://example.test/cover.png', { active: true, insert: true, setParent: true }],
+    ['copy', 'copied text', 'text'],
   ]);
 
   const fallback = createUserscriptAdapters({
@@ -287,6 +303,17 @@ test('userscript adapters invoke each GM capability, with false fallbacks for mi
   assert.equal(fallback.download({}), false);
   assert.equal(fallback.open('https://example.test'), false);
   assert.equal(fallback.copy('text'), false);
+
+  const grantedCalls = [];
+  const granted = createUserscriptAdapters({}, {
+    GM_download: (details) => grantedCalls.push(['download', details]),
+    GM_openInTab: (url, options) => grantedCalls.push(['open', url, options]),
+    GM_setClipboard: (text, type) => grantedCalls.push(['copy', text, type]),
+  });
+  assert.equal(granted.download({ url: 'data:image/png;base64,x', name: 'x.png' }), true);
+  assert.equal(granted.open('https://example.test/image.jpg'), true);
+  assert.equal(granted.copy('https://example.test/image.jpg'), true);
+  assert.deepEqual(grantedCalls.map(([name]) => name), ['download', 'open', 'copy']);
 });
 
 test('cover filenames support BV, episode, ordinary identities, source extensions, and Windows limits', () => {
@@ -411,6 +438,16 @@ test('capture and cover actions show operable previews before downstream operati
   modal.querySelector('[data-bili-frame-modal-action="download"]').click();
   assert.equal(calls[0][0], 'download');
   assert.equal(calls[0][1].name, '演示视频 - BV1TEST.png');
+  assert.match(
+    modal.querySelector('[data-bili-frame-modal-feedback]').textContent,
+    /下载截图/,
+  );
+  assert.equal(typeof calls[0][1].onerror, 'function');
+  calls[0][1].onerror({ error: 'not_permitted' });
+  assert.match(
+    modal.querySelector('[data-bili-frame-modal-feedback]').textContent,
+    /截图下载失败.*下载权限/,
+  );
 
   const cover = actions.cover(opener);
   assert.equal(cover.ok, true);
@@ -423,6 +460,10 @@ test('capture and cover actions show operable previews before downstream operati
   modal.querySelector('[data-bili-frame-modal-action="open"]').click();
   modal.querySelector('[data-bili-frame-modal-action="copy"]').click();
   assert.deepEqual(calls.map(([kind]) => kind), ['download', 'download', 'open', 'copy']);
+  assert.match(
+    modal.querySelector('[data-bili-frame-modal-feedback]').textContent,
+    /封面地址/,
+  );
   assert.ok(statuses.some((status) => status.message?.includes('预览')));
 });
 
@@ -521,6 +562,7 @@ test('styles and controls are namespaced, idempotent, accessible, and icon-backe
   assert.match(first.textContent, /\.bili-frame-control/);
   assert.match(first.textContent, /\.bili-frame-icon\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
   assert.match(first.textContent, /prefers-reduced-motion/);
+  assert.match(first.textContent, /\.bili-frame-modal::backdrop/);
   assert.doesNotMatch(first.textContent, /(^|\n)\s*\.bpx-player/);
   const controls = mountControls(findPlayerAdapter(fixture.document), {}).controls;
   assert.ok(controls.every((control) => control.innerHTML.includes('<svg')));
@@ -571,6 +613,40 @@ test('lifecycle control clicks open visible frame and cover previews with defaul
     'https://i0.hdslb.com/bfs/archive/life.jpg',
   );
   assert.deepEqual(externalCalls, []);
+  harness.controller.destroy();
+});
+
+test('lifecycle image actions use explicitly captured userscript grants', () => {
+  const fixture = playerFixture();
+  const video = fixture.document.createElement('video');
+  Object.assign(video, {
+    readyState: 4,
+    duration: 120,
+    currentTime: 12.5,
+    videoWidth: 640,
+    videoHeight: 360,
+    clientWidth: 640,
+    clientHeight: 360,
+    pause() {},
+  });
+  fixture.videoWrap.appendChild(video);
+  const calls = [];
+  const harness = lifecycleHarness(fixture, {
+    coverUrl: 'https://i0.hdslb.com/bfs/archive/grant.jpg',
+    userscriptApis: {
+      GM_download: (details) => calls.push(['download', details]),
+      GM_openInTab: (url) => calls.push(['open', url]),
+      GM_setClipboard: (text) => calls.push(['copy', text]),
+    },
+  });
+
+  harness.controller.ensure();
+  harness.controller.getMounted().controls[3].click();
+  const modal = fixture.document.body.querySelector('[data-bili-frame-modal="cover"]');
+  modal.querySelector('[data-bili-frame-modal-action="download"]').click();
+  modal.querySelector('[data-bili-frame-modal-action="open"]').click();
+  modal.querySelector('[data-bili-frame-modal-action="copy"]').click();
+  assert.deepEqual(calls.map(([name]) => name), ['download', 'open', 'copy']);
   harness.controller.destroy();
 });
 

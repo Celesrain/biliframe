@@ -48,7 +48,7 @@ Four icon buttons are inserted immediately after the native play/pause button:
 
 The buttons reuse the native control class and dimensions, but all custom styling is namespaced under `bili-frame-*`. Each button has `role="button"`, `tabindex="0"`, an `aria-label`, a descriptive title, and keyboard activation for Enter/Space. Only the previous/next-frame titles advertise shortcuts; capture and cover are direct-click controls.
 
-A small status pill reports pause/seek time, measured FPS, preview creation, saves, copies, and actionable failures. Both image controls use a keyboard-dismissible, preview-first modal. The current-frame modal provides Download screenshot and Copy current-time URL; the cover modal provides:
+A small status pill reports pause/seek time and measured FPS. Both image controls use a keyboard-dismissible, preview-first native `<dialog>` opened with `showModal()`, placing the preview in the browser top layer even when the player is fullscreen. A non-dialog fallback retains compatibility with older engines. Image-action outcomes are also rendered inside the preview so they remain visible there. The current-frame modal provides Download screenshot and Copy current-time URL; the cover modal provides:
 
 - the original-resolution image suitable for right-click saving;
 - a filename preview;
@@ -81,7 +81,7 @@ Cover resolution order:
 
 Bilibili's trailing `@...` image transformation is removed only from recognized image-path suffixes. Query strings and ordinary `@` characters are preserved.
 
-Clicking either image control first opens a visible preview and performs no download, tab opening, or clipboard write. Cover download is user-triggered through `GM_download` and limited by metadata to `hdslb.com` (including its subdomains). If the userscript manager cannot download directly, BiliFrame can open the original image so the browser can save it normally.
+Clicking either image control first opens a visible preview and performs no download, tab opening, or clipboard write. Bootstrap captures the granted `GM_download`, `GM_openInTab`, and `GM_setClipboard` functions from the userscript sandbox explicitly instead of assuming that they are properties of the page window. Cover download is user-triggered through `GM_download` and limited by metadata to `hdslb.com` (including its subdomains). If the userscript manager cannot download directly, BiliFrame can open the original image so the browser can save it normally.
 
 Current-frame capture draws the displayed video frame to a canvas at `videoWidth × videoHeight`, shows the resulting PNG in the shared preview, and downloads it only after the user clicks Download screenshot. The filename uses the title plus BV/episode identity. Cross-origin/canvas failures are reported visibly instead of silently doing nothing.
 
@@ -97,9 +97,9 @@ Current-frame capture draws the displayed video frame to a canvas at `videoWidth
 ## Privacy and permissions
 
 - No analytics, telemetry, cookies, storage, account data, or background network requests.
-- `GM_download` is used only after the user clicks Download screenshot or Download original in a preview.
+- `GM_download` is used only after the user clicks Download screenshot or Download original in a preview; callbacks update the preview with completion or a concrete manager/browser failure.
 - `GM_setClipboard` is used only after the user clicks a copy action.
-- `GM_openInTab` is used only after the user clicks Open original.
+- `GM_openInTab` is used only after the user clicks Open original and requests an active child tab.
 - No page globals, credentials, or private Bilibili APIs are read.
 
 ## Explicit exclusions
