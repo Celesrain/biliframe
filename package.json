@@ -1,0 +1,15 @@
+{
+  "name": "biliframe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A native-looking Bilibili userscript for frame stepping and image capture.",
+  "scripts": {
+    "check": "node --check src/biliframe.user.js",
+    "test": "node --test",
+    "verify": "npm run check && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
