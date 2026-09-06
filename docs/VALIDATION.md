@@ -5,7 +5,7 @@
 ## 自动化检查
 
 - [x] `npm run check`：Node 语法检查通过。
-- [x] `npm test`：Node 内置测试套件全部通过（54 tests）。
+- [x] `npm test`：Node 内置测试套件全部通过（55 tests）。
 - [x] `npm run verify`：语法检查和测试均通过。
 - [x] `git diff --check`：无空白错误。
 - [x] 用户脚本元数据：匹配路由、权限、连接域、版本和许可证与 README 一致。
@@ -13,7 +13,7 @@
 
 ## 图片文件名模板检查
 
-- [x] 菜单可打开图片名设置并显示 `{{title}}`、`{{bvid}}`、`{{timestamp}}`、`{{date}}`、`{{time}}`、`{{kind}}`；其中 `{{kind}}` 实际值为 `frame` 或 `cover`（Node/fake-DOM 自动化覆盖）。
+- [x] 菜单可打开图片名设置并显示 `{{title}}`、`{{identity}}`、`{{bvid}}`、`{{timestamp}}`、`{{date}}`、`{{time}}`、`{{kind}}`；其中 `{{identity}}` 为 BV/ep 等页面标识，`{{kind}}` 实际值为 `frame` 或 `cover`（Node/fake-DOM 自动化覆盖）。
 - [x] 自定义模板保存后，当前会话后续截图和封面下载立即使用新模板。
 - [x] 恢复默认模板后，默认命名行为恢复。
 - [x] 缺失占位符值、未知占位符、空模板、Windows 保留名和非法字符均安全处理。

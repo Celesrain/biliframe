@@ -938,7 +938,7 @@
       const hint = document.createElement('div');
       hint.className = 'bili-frame-filename-placeholder-hint';
       hint.setAttribute('data-bili-frame-filename-hint', 'true'); hint.textContent = '可用占位符：';
-      const placeholders = ['title', 'bvid', 'timestamp', 'date', 'time', 'kind'];
+      const placeholders = ['title', 'identity', 'bvid', 'timestamp', 'date', 'time', 'kind'];
       placeholders.forEach((name) => {
         const button = document.createElement('button');
         button.type = 'button'; button.className = 'bili-frame-filename-placeholder'; button.textContent = `{{${name}}}`;
@@ -1119,7 +1119,8 @@
         pageUrl: options.pageUrl || root.location?.href || '',
         title: options.title || document.title || DEFAULT_FILENAME,
         identity: options.identity || root.location?.pathname?.match(/(?:BV[\w]+|ep\d+)/i)?.[0] || '',
-        filenameTemplate: options.getFilenameTemplate?.() || options.filenameTemplate,
+        getFilenameTemplate: options.getFilenameTemplate,
+        filenameTemplate: options.filenameTemplate,
         onStatus: reportStatus,
       });
       mounted = mountControls(adapter, {

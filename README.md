@@ -67,6 +67,7 @@ BiliFrame 是面向桌面端哔哩哔哩 HTML5 播放器的 Tampermonkey 用户�
 | 占位符 | 含义 |
 | --- | --- |
 | `{{title}}` | 视频标题 |
+| `{{identity}}` | 页面视频标识（BV 号、ep 号等）；默认模板使用此占位符 |
 | `{{bvid}}` | 视频 BV 号 |
 | `{{timestamp}}` | 当前播放时间（含时分秒） |
 | `{{date}}` | 当前日期 |

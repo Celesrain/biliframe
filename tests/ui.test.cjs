@@ -11,6 +11,7 @@ const {
   createFrameStepAction,
   createCoverModal,
   createFilenameSettingsMenu,
+  bootstrap,
   resolveCoverUrl,
   createUserscriptAdapters,
   buildCoverFilename,
@@ -406,7 +407,8 @@ test('filename settings menu supports injectable GM storage and registration ada
   assert.ok(dialog);
   const input = dialog.querySelector('input');
   assert.ok(input);
-  assert.equal(dialog.querySelectorAll('[data-bili-frame-filename-insert]').length, 6);
+  assert.equal(dialog.querySelectorAll('[data-bili-frame-filename-insert]').length, 7);
+  assert.ok(dialog.querySelector('[data-bili-frame-filename-insert="identity"]'));
   const insert = dialog.querySelector('[data-bili-frame-filename-insert="bvid"]');
   assert.ok(insert);
   input.value = '{{title}}_{{bvid}}';
@@ -429,6 +431,7 @@ test('filename settings menu restores default and cancels without persistence wh
   assert.ok(dialog.querySelector('[data-bili-frame-filename-action="reset"]'));
   dialog.querySelector('[data-bili-frame-filename-action="reset"]').click();
   assert.equal(dialog.querySelector('input').value, '{{title}} - {{identity}}');
+  assert.ok(dialog.querySelector('[data-bili-frame-filename-insert="identity"]'));
   dialog.querySelector('[data-bili-frame-filename-action="cancel"]').click();
   assert.equal(document.body.querySelector('[data-bili-frame-filename-settings]'), null);
   assert.equal(api.getTemplate(), undefined);
@@ -470,6 +473,50 @@ test('mounted media actions read a changed filename template on the next click',
   assert.equal(actions.capture().filename, '标题-old.png');
   template = '{{title}}-new';
   assert.equal(actions.capture().filename, '标题-new.png');
+});
+
+test('bootstrapped controls use a filename template saved after mounting', () => {
+  const fixture = playerFixture();
+  const video = fixture.document.createElement('video');
+  Object.assign(video, {
+    readyState: 4, videoWidth: 640, videoHeight: 360, currentTime: 1,
+    clientWidth: 640, clientHeight: 360, ownerDocument: fixture.document,
+  });
+  fixture.videoWrap.appendChild(video);
+  const canvas = { getContext: () => ({ drawImage() {} }), toDataURL: () => 'data:image/png;base64,frame' };
+  let menuCommand;
+  const storage = new Map([['filenameTemplate', '{{title}}-old']]);
+  const controller = bootstrap({
+    document: fixture.document,
+    location: { href: 'https://www.bilibili.com/video/BV1' },
+    addEventListener() {},
+    removeEventListener() {},
+    history: { pushState() {}, replaceState() {} },
+    setTimeout: () => 1,
+    clearTimeout() {},
+  }, {
+    canvas,
+    adapters: {
+      GM_getValue: (key, fallback) => storage.has(key) ? storage.get(key) : fallback,
+      GM_setValue: (key, value) => storage.set(key, value),
+      GM_registerMenuCommand: (_label, callback) => { menuCommand = callback; },
+    },
+    title: '标题',
+    identity: 'BV1ABC',
+  });
+  controller.ensure();
+  const controls = controller.getMounted().controls;
+  controls[2].click();
+  assert.equal(fixture.document.body.querySelector('[data-bili-frame-modal-filename]').textContent, '标题-old.png');
+  fixture.document.body.querySelector('[data-bili-frame-modal-action="close"]').click();
+  menuCommand();
+  const dialog = fixture.document.body.querySelector('[data-bili-frame-filename-settings]');
+  const input = dialog.querySelector('input');
+  input.value = '{{title}}-new';
+  dialog.querySelector('[data-bili-frame-filename-action="save"]').click();
+  controls[2].click();
+  assert.equal(fixture.document.body.querySelector('[data-bili-frame-modal-filename]').textContent, '标题-new.png');
+  controller.destroy();
 });
 
 test('filename menu accepts raw GM injections and only unregisters valid command ids', () => {

@@ -98,17 +98,17 @@ test('filename templates preserve the default title-identity-extension conventio
   );
 });
 
-test('filename templates expand title, bvid/identity, timestamp, date, time, and kind', () => {
+test('filename templates expand title, identity/bvid, timestamp, date, time, and kind', () => {
   assert.equal(
     buildFilenameFromTemplate(
-      '{{title}}-{{bvid}}-{{timestamp}}-{{date}}-{{time}}-{{kind}}',
+      '{{title}}-{{identity}}-{{bvid}}-{{timestamp}}-{{date}}-{{time}}-{{kind}}',
       {
         title: '测试视频', identity: 'BV1ABC', bvid: 'BV1ABC',
         timestamp: '00-00-12-500', date: '2024-01-02', time: '03-04-05', kind: 'frame',
       },
       'png',
     ),
-    '测试视频-BV1ABC-00-00-12-500-2024-01-02-03-04-05-frame.png',
+    '测试视频-BV1ABC-BV1ABC-00-00-12-500-2024-01-02-03-04-05-frame.png',
   );
 });
 

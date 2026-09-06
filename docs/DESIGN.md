@@ -78,7 +78,9 @@ Bilibili's trailing `@...` image transformation is removed only from recognized 
 ### Image filename templates
 
 Screenshot and cover downloads use one user-editable template. The supported placeholders are
-`{{title}}`, `{{bvid}}`, `{{timestamp}}`, `{{date}}`, `{{time}}`, and `{{kind}}`.
+`{{title}}`, `{{identity}}`, `{{bvid}}`, `{{timestamp}}`, `{{date}}`, `{{time}}`, and `{{kind}}`.
+The `{{identity}}` value is the page's video identifier, such as a BV or episode (`ep`) number;
+`{{bvid}}` remains as a convenient alias for users who specifically want the BV number.
 The `{{kind}}` value is `frame` for screenshots and `cover` for original covers.
 The resolver substitutes missing values with safe fallbacks, strips filesystem-illegal
 characters, prevents empty or reserved Windows names, and appends the image extension rather
