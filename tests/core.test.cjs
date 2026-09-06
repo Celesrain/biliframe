@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildTimestampUrl,
+  buildFilenameFromTemplate,
   calculateStepTarget,
   estimateFrameDuration,
   formatTimestamp,
@@ -88,6 +89,58 @@ test('buildTimestampUrl replaces t while preserving unrelated query and hash', (
     buildTimestampUrl('https://www.bilibili.com/video/BV123/?p=2&t=1#reply', 65.4321),
     'https://www.bilibili.com/video/BV123/?p=2&t=65.432#reply',
   );
+});
+
+test('filename templates preserve the default title-identity-extension convention', () => {
+  assert.equal(
+    buildFilenameFromTemplate(undefined, { title: '标题', identity: 'BV1ABC', kind: 'cover' }, 'jpg'),
+    '标题 - BV1ABC.jpg',
+  );
+});
+
+test('filename templates expand title, bvid/identity, timestamp, date, time, and kind', () => {
+  assert.equal(
+    buildFilenameFromTemplate(
+      '{{title}}-{{bvid}}-{{timestamp}}-{{date}}-{{time}}-{{kind}}',
+      {
+        title: '测试视频', identity: 'BV1ABC', bvid: 'BV1ABC',
+        timestamp: '00-00-12-500', date: '2024-01-02', time: '03-04-05', kind: 'frame',
+      },
+      'png',
+    ),
+    '测试视频-BV1ABC-00-00-12-500-2024-01-02-03-04-05-frame.png',
+  );
+});
+
+test('filename templates derive local date and time from injected now when omitted', () => {
+  const now = new Date(2024, 0, 2, 3, 4, 5, 6);
+  assert.equal(
+    buildFilenameFromTemplate('{{date}}-{{time}}', { now }, 'png'),
+    '2024-01-02-03-04-05.png',
+  );
+  assert.match(
+    buildFilenameFromTemplate('{{date}}-{{time}}', { now: 'not-a-date' }, 'png'),
+    /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.png$/,
+  );
+});
+
+test('filename templates remove unknown placeholders instead of leaking template syntax', () => {
+  assert.equal(
+    buildFilenameFromTemplate('{{title}}-{{unknown}}-{{kind}}', { title: '标题', kind: 'cover' }, 'jpg'),
+    '标题--cover.jpg',
+  );
+});
+
+test('filename templates sanitize Windows names, fall back when empty, append one extension, and enforce maximum length', () => {
+  assert.equal(
+    buildFilenameFromTemplate('{{title}}', { title: 'CON<>:"/\\|?*' }, 'png'),
+    '_CON_.png',
+  );
+  assert.equal(buildFilenameFromTemplate('{{unknown}}', {}, 'png'), 'BiliFrame.png');
+  assert.equal(buildFilenameFromTemplate('{{title}}.png', { title: '标题' }, 'png'), '标题.png');
+  const result = buildFilenameFromTemplate('{{title}}', { title: '长'.repeat(200) }, 'webp', 40);
+  assert.equal(result.length, 40);
+  assert.ok(result.endsWith('.webp'));
 });
 
 test('editable and interactive targets block global shortcuts', () => {

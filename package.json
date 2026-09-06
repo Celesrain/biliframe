@@ -1,6 +1,6 @@
 {
   "name": "biliframe",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
   "description": "A native-looking Bilibili userscript for frame stepping and image capture.",
   "scripts": {

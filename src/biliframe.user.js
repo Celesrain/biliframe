@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         BiliFrame - 哔哩哔哩逐帧与截图工具
 // @namespace    https://github.com/Celesrain/biliframe
-// @version      0.1.3
-// @description  为哔哩哔哩播放器添加逐帧前进/后退、当前帧截图和原始封面查看下载功能。
+// @version      0.2.0
+// @description  为哔哩哔哩播放器添加逐帧控制、预览式截图/封面下载和可自定义图片文件名功能。
 // @author       Celesrain
 // @license      MIT
 // @match        https://www.bilibili.com/video/*
@@ -14,6 +14,10 @@
 // @grant        GM_download
 // @grant        GM_openInTab
 // @grant        GM_setClipboard
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @run-at       document-start
 // ==/UserScript==
 
@@ -24,6 +28,10 @@
     GM_download: typeof GM_download === 'function' ? GM_download : undefined,
     GM_openInTab: typeof GM_openInTab === 'function' ? GM_openInTab : undefined,
     GM_setClipboard: typeof GM_setClipboard === 'function' ? GM_setClipboard : undefined,
+    GM_getValue: typeof GM_getValue === 'function' ? GM_getValue : undefined,
+    GM_setValue: typeof GM_setValue === 'function' ? GM_setValue : undefined,
+    GM_registerMenuCommand: typeof GM_registerMenuCommand === 'function' ? GM_registerMenuCommand : undefined,
+    GM_unregisterMenuCommand: typeof GM_unregisterMenuCommand === 'function' ? GM_unregisterMenuCommand : undefined,
   };
   const api = factory();
 
@@ -40,6 +48,8 @@
   const MIN_FRAME_DURATION = 1 / 240;
   const MAX_FRAME_DURATION = 1 / 10;
   const DEFAULT_FILENAME = 'BiliFrame';
+  const DEFAULT_FILENAME_TEMPLATE = '{{title}} - {{identity}}';
+  const FILENAME_TEMPLATE_KEY = 'filenameTemplate';
   const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
   function normalizeCoverUrl(value) {
@@ -75,7 +85,7 @@
       return DEFAULT_FILENAME;
     }
 
-    if (WINDOWS_RESERVED_NAME.test(filename)) {
+    if (WINDOWS_RESERVED_NAME.test(filename) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])_/i.test(filename)) {
       filename = `_${filename}`;
     }
 
@@ -88,6 +98,42 @@
     const baseLength = safeMaximum - extension.length;
     const base = filename.slice(0, Math.max(1, baseLength)).replace(/[ .]+$/g, '');
     return `${base}${extension}`.slice(0, safeMaximum);
+  }
+
+  function buildFilenameFromTemplate(template, values = {}, extension = 'png', maximumLength = 120) {
+    const source = typeof template === 'string' && template.trim() ? template : DEFAULT_FILENAME_TEMPLATE;
+    const timestampValue = values.timestamp ?? values.currentTime;
+    const timestamp = typeof timestampValue === 'string' && /^\d{2}-\d{2}-\d{2}-\d{3}$/.test(timestampValue)
+      ? timestampValue
+      : formatTimestamp(Number(timestampValue));
+    let now = values.now;
+    if (now === undefined) now = new Date();
+    const dateValue = now instanceof Date ? now : new Date(now);
+    const validDate = Number.isNaN(dateValue.getTime()) ? new Date() : dateValue;
+    const pad = (value) => String(value).padStart(2, '0');
+    const localDate = validDate
+      ? `${validDate.getFullYear()}-${pad(validDate.getMonth() + 1)}-${pad(validDate.getDate())}`
+      : '';
+    const localTime = validDate
+      ? `${pad(validDate.getHours())}-${pad(validDate.getMinutes())}-${pad(validDate.getSeconds())}`
+      : '';
+    const replacements = {
+      title: values.title ?? '',
+      bvid: values.bvid ?? values.identity ?? '',
+      identity: values.identity ?? values.bvid ?? '',
+      timestamp,
+      date: values.date ?? localDate,
+      time: values.time ?? localTime,
+      kind: values.kind ?? '',
+    };
+    let rendered = source.replace(/\{\{\s*([a-z]+)\s*\}\}/gi, (_match, key) => String(replacements[key.toLowerCase()] ?? ''));
+    rendered = rendered.replace(/\{\{[^{}]*\}\}/g, '');
+    if (!rendered.trim()) rendered = DEFAULT_FILENAME;
+    const normalizedExtension = String(extension || 'png').replace(/^\.+/, '').replace(/[^a-z0-9]/gi, '') || 'png';
+    const extensionPattern = new RegExp(`\\.${normalizedExtension}$`, 'i');
+    if (!extensionPattern.test(rendered)) rendered = `${rendered}.${normalizedExtension}`;
+    else rendered = rendered.replace(new RegExp(`(?:\\.${normalizedExtension})+$`, 'i'), `.${normalizedExtension}`);
+    return sanitizeFilename(rendered, maximumLength);
   }
 
   function parseFrameRate(value) {
@@ -579,18 +625,49 @@
       download: (details) => call('GM_download', [details]),
       open: (url) => call('GM_openInTab', [url, { active: true, insert: true, setParent: true }]),
       copy: (text) => call('GM_setClipboard', [text, 'text']),
+      getValue: (key, fallback) => {
+        const api = resolveApi('GM_getValue');
+        if (typeof api !== 'function') return fallback;
+        try { return api(key, fallback); } catch { return fallback; }
+      },
+      setValue: (key, value) => call('GM_setValue', [key, value]),
+      registerMenu: (label, callback) => {
+        const api = resolveApi('GM_registerMenuCommand');
+        if (typeof api !== 'function') return null;
+        try { return api(label, callback); } catch { return null; }
+      },
+      unregisterMenu: (id) => {
+        const api = resolveApi('GM_unregisterMenuCommand');
+        if (typeof api !== 'function') return false;
+        try { api(id); return true; } catch { return false; }
+      },
     };
+  }
+
+  function normalizeFilenameAdapters(options = {}) {
+    const supplied = options.adapters;
+    if (supplied && Object.keys(supplied).some((key) => /^GM_/.test(key))) {
+      return createUserscriptAdapters(supplied, supplied);
+    }
+    if (supplied) return supplied;
+    return createUserscriptAdapters(options.root, options.userscriptApis);
   }
 
   function buildCoverFilename(titleOrOptions, identity, coverUrl) {
     const options = titleOrOptions && typeof titleOrOptions === 'object'
       ? titleOrOptions
       : { title: titleOrOptions, identity, coverUrl };
-    const title = options.title || 'BiliFrame';
+    const title = options.title || DEFAULT_FILENAME;
     const id = options.identity || options.bvid || options.episode || '';
     const url = options.coverUrl || options.url || '';
     const extension = String(url).match(/\.([a-z0-9]{1,10})(?:[?#@]|$)/i)?.[1] || 'png';
-    return sanitizeFilename([title, id].filter(Boolean).join(' - ') + `.${extension}`);
+    return buildFilenameFromTemplate(options.filenameTemplate, {
+      ...options,
+      title,
+      identity: id,
+      currentTime: options.currentTime,
+      kind: options.kind || 'cover',
+    }, extension);
   }
 
   function captureCurrentFrame(video, options = {}) {
@@ -613,11 +690,15 @@
       const context = canvas.getContext('2d');
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/png');
-      const filename = options.filename || buildCoverFilename({
+      const filename = options.filename || buildFilenameFromTemplate(options.getFilenameTemplate?.() || options.filenameTemplate, {
         title: options.title,
         identity: options.identity,
-        coverUrl: '.png',
-      });
+        bvid: options.bvid,
+        timestamp: options.timestamp ?? options.currentTime ?? video.currentTime,
+        date: options.date,
+        time: options.time,
+        kind: options.kind || 'frame',
+      }, 'png');
       const status = {
         ok: true,
         type: 'frame-captured',
@@ -652,7 +733,7 @@
   }
 
   function createMediaActions(options = {}) {
-    const adapters = options.adapters || createUserscriptAdapters(options.root);
+    const adapters = options.adapters || createUserscriptAdapters(options.root, options.userscriptApis);
     const getVideo = () => options.getVideo?.() || options.video;
     const getDocument = () => options.document || getVideo()?.ownerDocument;
     const report = typeof options.onStatus === 'function' ? options.onStatus : () => {};
@@ -720,6 +801,7 @@
       capture: (opener) => {
         const result = captureCurrentFrame(getVideo(), {
           ...options,
+          filenameTemplate: options.getFilenameTemplate?.() || options.filenameTemplate,
           adapters: undefined,
           onStatus: undefined,
         });
@@ -777,6 +859,10 @@
         const filename = buildCoverFilename({
           title: options.title,
           identity: options.identity,
+          bvid: options.bvid,
+          filenameTemplate: options.getFilenameTemplate?.() || options.filenameTemplate,
+          currentTime: undefined,
+          kind: 'cover',
           coverUrl: url,
         });
         const modalApi = createCoverModal(document, {
@@ -816,6 +902,92 @@
     };
   }
 
+  function createFilenameSettingsMenu(document, options = {}) {
+    const adapters = normalizeFilenameAdapters(options);
+    let template;
+    try { template = adapters.getValue?.(FILENAME_TEMPLATE_KEY, undefined); } catch { template = undefined; }
+    let currentTemplate = typeof template === 'string' && template.trim() ? template : undefined;
+    let dialog = null;
+    const sample = { title: '示例视频', identity: 'BV1TEST', bvid: 'BV1TEST', currentTime: 12.5, kind: 'frame' };
+    const open = () => {
+      if (!document?.body?.appendChild) return null;
+      ensureStyles(document);
+      if (dialog?.parentNode) dialog.parentNode.removeChild(dialog);
+      dialog = document.createElement('dialog');
+      dialog.className = 'bili-frame-modal bili-frame-filename-settings';
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-label', '图片文件名模板设置');
+      dialog.setAttribute('data-bili-frame-filename-settings', 'true');
+      dialog.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' || event.code === 'Escape') close();
+      });
+      dialog.addEventListener('close', close);
+      const content = document.createElement('div');
+      content.className = 'bili-frame-filename-settings-content';
+      content.setAttribute('data-bili-frame-filename-content', 'true');
+      const heading = document.createElement('h3');
+      heading.className = 'bili-frame-filename-settings-heading';
+      heading.textContent = '图片文件名模板';
+      const input = document.createElement('input');
+      input.type = 'text'; input.value = currentTemplate || DEFAULT_FILENAME_TEMPLATE;
+      input.className = 'bili-frame-filename-template-input';
+      input.id = 'bili-frame-filename-template-input';
+      input.setAttribute('aria-label', '图片文件名模板');
+      const label = document.createElement('label');
+      label.setAttribute('for', input.id); label.textContent = '图片文件名模板';
+      const hint = document.createElement('div');
+      hint.className = 'bili-frame-filename-placeholder-hint';
+      hint.setAttribute('data-bili-frame-filename-hint', 'true'); hint.textContent = '可用占位符：';
+      const placeholders = ['title', 'bvid', 'timestamp', 'date', 'time', 'kind'];
+      placeholders.forEach((name) => {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'bili-frame-filename-placeholder'; button.textContent = `{{${name}}}`;
+        button.setAttribute('data-bili-frame-filename-insert', name);
+        button.addEventListener('click', () => {
+          const token = `{{${name}}}`;
+          const start = Number.isInteger(input.selectionStart) ? input.selectionStart : input.value.length;
+          const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
+          input.value = `${input.value.slice(0, start)}${token}${input.value.slice(end)}`;
+          input.setSelectionRange?.(start + token.length, start + token.length);
+          refresh();
+        });
+        hint.appendChild(button);
+      });
+      const preview = document.createElement('div');
+      preview.className = 'bili-frame-filename-preview';
+      preview.setAttribute('data-bili-frame-filename-preview', 'true');
+      const refresh = () => { preview.textContent = `预览：${buildFilenameFromTemplate(input.value, sample, 'png')}`; };
+      input.addEventListener('input', refresh); refresh();
+      const actions = document.createElement('div');
+      actions.className = 'bili-frame-filename-actions';
+      [['save', '保存'], ['reset', '恢复默认'], ['cancel', '取消']].forEach(([name, label]) => {
+        const button = document.createElement('button'); button.type = 'button'; button.className = `bili-frame-filename-action bili-frame-filename-action-${name}`; button.textContent = label;
+        button.setAttribute('data-bili-frame-filename-action', name);
+        button.addEventListener('click', () => {
+          if (name === 'save') {
+            const value = input.value.trim() || DEFAULT_FILENAME_TEMPLATE;
+            currentTemplate = value;
+            try { adapters.setValue?.(FILENAME_TEMPLATE_KEY, value); } catch { /* safe fallback */ }
+            close();
+          } else if (name === 'reset') { input.value = DEFAULT_FILENAME_TEMPLATE; refresh(); }
+          else close();
+        });
+        actions.appendChild(button);
+      });
+      content.append(heading, label, input, hint, preview, actions);
+      dialog.append(content);
+      document.body.appendChild(dialog);
+      try { dialog.showModal?.(); } catch { dialog.setAttribute('open', ''); }
+      return dialog;
+    };
+    const close = () => { if (dialog?.parentNode) dialog.parentNode.removeChild(dialog); dialog = null; };
+    const commandId = adapters.registerMenu?.('图片文件名模板', open);
+    return { open, close, getTemplate: () => currentTemplate, destroy: () => {
+      close();
+      if (commandId !== null && commandId !== undefined) adapters.unregisterMenu?.(commandId);
+    } };
+  }
+
   function ensureStyles(document) {
     if (!document?.head && !document?.documentElement) return null;
     const root = document.head || document.documentElement;
@@ -838,6 +1010,18 @@
 .bili-frame-modal-filename { margin-top:8px; overflow-wrap:anywhere; } .bili-frame-modal-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:12px; padding:10px 12px; border-radius:8px; background:rgba(24,24,28,.96); }
 .bili-frame-modal-feedback { min-height:20px; margin-top:8px; padding:6px 10px; border-radius:6px; color:#fff; background:rgba(24,24,28,.96); font:13px/1.4 sans-serif; }
 .bili-frame-modal-feedback[hidden] { display:none; }
+.bili-frame-filename-settings-content { width:min(92vw,640px); max-width:100%; box-sizing:border-box; padding:20px; border-radius:8px; background:rgba(24,24,28,.98); box-shadow:0 12px 40px rgba(0,0,0,.4); }
+.bili-frame-filename-settings-heading { margin:0 0 16px; color:#fff; font:600 18px/1.4 sans-serif; }
+.bili-frame-filename-settings-content label, .bili-frame-filename-placeholder-hint { display:block; margin:8px 0; color:rgba(255,255,255,.86); font:13px/1.4 sans-serif; }
+.bili-frame-filename-template-input { display:block; width:100%; min-height:36px; box-sizing:border-box; padding:8px 10px; border:1px solid rgba(255,255,255,.34); border-radius:4px; color:#fff; background:rgba(0,0,0,.3); font:14px/1.4 monospace; }
+.bili-frame-filename-template-input:focus-visible { border-color:#00aeec; outline:2px solid rgba(0,174,236,.55); outline-offset:1px; }
+.bili-frame-filename-placeholder-hint { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:14px; }
+.bili-frame-filename-placeholder { min-height:28px; padding:4px 8px; border:1px solid rgba(255,255,255,.3); border-radius:4px; color:#fff; background:rgba(255,255,255,.1); font:12px/1.2 monospace; cursor:pointer; }
+.bili-frame-filename-placeholder:hover, .bili-frame-filename-placeholder:focus-visible { background:rgba(0,174,236,.28); outline:2px solid #00aeec; outline-offset:1px; }
+.bili-frame-filename-preview { margin-top:14px; padding:8px 10px; overflow-wrap:anywhere; border-radius:4px; color:rgba(255,255,255,.78); background:rgba(0,0,0,.24); font:12px/1.4 monospace; }
+.bili-frame-filename-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:16px; }
+.bili-frame-filename-action { min-height:32px; padding:6px 12px; border:1px solid rgba(255,255,255,.35); border-radius:4px; color:#fff; background:rgba(255,255,255,.1); cursor:pointer; }
+.bili-frame-filename-action:hover, .bili-frame-filename-action:focus-visible { background:rgba(255,255,255,.22); outline:2px solid currentColor; outline-offset:2px; }
 .bili-frame-modal-feedback-success { background:rgba(24,120,70,.94); }
 .bili-frame-modal-feedback-error { background:rgba(170,45,45,.96); }
 .bili-frame-modal-action { min-height:32px; padding:6px 12px; border:1px solid rgba(255,255,255,.35); border-radius:4px; color:#fff; background:rgba(255,255,255,.1); cursor:pointer; }
@@ -935,6 +1119,7 @@
         pageUrl: options.pageUrl || root.location?.href || '',
         title: options.title || document.title || DEFAULT_FILENAME,
         identity: options.identity || root.location?.pathname?.match(/(?:BV[\w]+|ep\d+)/i)?.[0] || '',
+        filenameTemplate: options.getFilenameTemplate?.() || options.filenameTemplate,
         onStatus: reportStatus,
       });
       mounted = mountControls(adapter, {
@@ -1024,8 +1209,21 @@
   }
 
   function bootstrap(root, options = {}) {
-    const controller = createLifecycleController(root, options);
+    const adapters = normalizeFilenameAdapters({
+      ...options,
+      root,
+    });
+    const menu = createFilenameSettingsMenu(root.document, {
+      adapters,
+    });
+    const controller = createLifecycleController(root, {
+      ...options,
+      adapters,
+      getFilenameTemplate: () => menu.getTemplate(),
+    });
     controller.start();
+    const destroy = controller.destroy;
+    controller.destroy = () => { destroy(); menu.destroy?.(); };
     return controller;
   }
 
@@ -1041,6 +1239,8 @@
     createLifecycleController,
     createStatusPresenter,
     createUserscriptAdapters,
+    createFilenameSettingsMenu,
+    buildFilenameFromTemplate,
     buildCoverFilename,
     captureCurrentFrame,
     copyTimestampLink,

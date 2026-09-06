@@ -37,6 +37,8 @@ class FakeElement {
     this.hidden = false;
     this.clientWidth = 0;
     this.clientHeight = 0;
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
   }
 
   set id(value) { this.setAttribute('id', value); }
@@ -98,6 +100,7 @@ class FakeElement {
   }
   click() { this.dispatchEvent(new FakeEvent('click', { bubbles: true, cancelable: true })); }
   focus() { this.ownerDocument.activeElement = this; }
+  setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   closest(selector) {
     let node = this;
     while (node) {

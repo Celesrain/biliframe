@@ -10,9 +10,11 @@ const {
   createFrameClock,
   createFrameStepAction,
   createCoverModal,
+  createFilenameSettingsMenu,
   resolveCoverUrl,
   createUserscriptAdapters,
   buildCoverFilename,
+  buildFilenameFromTemplate,
   captureCurrentFrame,
   copyTimestampLink,
   createMediaActions,
@@ -364,6 +366,123 @@ test('captureCurrentFrame sizes intrinsic canvas and returns a preview payload w
   assert.deepEqual(downloads, []);
   assert.equal(result.dataUrl, 'data:image/png;base64,frame');
   assert.equal(result.filename, '标题 - BV1.png');
+});
+
+test('capture and cover previews use the configured filename template', () => {
+  const { document } = createDom();
+  const video = { readyState: 4, videoWidth: 640, videoHeight: 360, currentTime: 12.5, ownerDocument: document };
+  const canvas = { getContext: () => ({ drawImage() {} }), toDataURL: () => 'data:image/png;base64,frame' };
+  const template = '{{kind}}-{{bvid}}-{{timestamp}}';
+  const frame = captureCurrentFrame(video, {
+    canvas, title: '标题', identity: 'BV1ABC', bvid: 'BV1ABC', timestamp: 12.5,
+    kind: 'frame', filenameTemplate: template,
+  });
+  assert.equal(frame.filename, 'frame-BV1ABC-00-00-12-500.png');
+
+  const actions = createMediaActions({
+    document, video, title: '标题', identity: 'BV1ABC',
+    filenameTemplate: template, coverUrl: 'https://i.hdslb.com/a.jpg',
+    adapters: { download: () => true },
+  });
+  const cover = actions.cover();
+  assert.equal(cover.ok, true);
+  assert.equal(document.body.querySelector('[data-bili-frame-modal-filename]').textContent, 'cover-BV1ABC-00-00-00-000.jpg');
+});
+
+test('filename settings menu supports injectable GM storage and registration adapters', () => {
+  const { document } = createDom();
+  const storage = new Map();
+  let command;
+  const api = createFilenameSettingsMenu(document, {
+    adapters: {
+      GM_getValue: (key, fallback) => storage.has(key) ? storage.get(key) : fallback,
+      GM_setValue: (key, value) => storage.set(key, value),
+      GM_registerMenuCommand: (_label, callback) => { command = callback; return 7; },
+    },
+  });
+  assert.equal(typeof command, 'function');
+  command();
+  const dialog = document.body.querySelector('[data-bili-frame-filename-settings]');
+  assert.ok(dialog);
+  const input = dialog.querySelector('input');
+  assert.ok(input);
+  assert.equal(dialog.querySelectorAll('[data-bili-frame-filename-insert]').length, 6);
+  const insert = dialog.querySelector('[data-bili-frame-filename-insert="bvid"]');
+  assert.ok(insert);
+  input.value = '{{title}}_{{bvid}}';
+  insert.click();
+  assert.match(input.value, /\{\{bvid\}\}/);
+  dialog.querySelector('[data-bili-frame-filename-preview]').textContent = '';
+  input.value = '{{title}}_{{bvid}}';
+  input.dispatchEvent(new FakeEvent('input', { bubbles: true }));
+  assert.match(dialog.querySelector('[data-bili-frame-filename-preview]').textContent, /示例|标题|BV/i);
+  dialog.querySelector('[data-bili-frame-filename-action="save"]').click();
+  assert.equal(storage.get('filenameTemplate'), '{{title}}_{{bvid}}');
+  assert.equal(api.getTemplate(), '{{title}}_{{bvid}}');
+});
+
+test('filename settings menu restores default and cancels without persistence when GM APIs are absent', () => {
+  const { document } = createDom();
+  const api = createFilenameSettingsMenu(document, { adapters: {} });
+  api.open();
+  let dialog = document.body.querySelector('[data-bili-frame-filename-settings]');
+  assert.ok(dialog.querySelector('[data-bili-frame-filename-action="reset"]'));
+  dialog.querySelector('[data-bili-frame-filename-action="reset"]').click();
+  assert.equal(dialog.querySelector('input').value, '{{title}} - {{identity}}');
+  dialog.querySelector('[data-bili-frame-filename-action="cancel"]').click();
+  assert.equal(document.body.querySelector('[data-bili-frame-filename-settings]'), null);
+  assert.equal(api.getTemplate(), undefined);
+});
+
+test('filename settings dialog uses a namespaced content container and refreshes insertion at the caret', () => {
+  const { document } = createDom();
+  const api = createFilenameSettingsMenu(document, { adapters: {} });
+  const dialog = api.open();
+  const content = dialog.querySelector('[data-bili-frame-filename-content]');
+  assert.ok(content);
+  assert.ok(content.querySelector('label'));
+  assert.ok(content.querySelector('[data-bili-frame-filename-hint]'));
+  const input = content.querySelector('input');
+  input.value = '{{title}}';
+  input.setSelectionRange(4, 4);
+  const button = content.querySelector('[data-bili-frame-filename-insert="bvid"]');
+  button.click();
+  assert.equal(input.value, '{{ti{{bvid}}tle}}');
+  assert.match(content.querySelector('[data-bili-frame-filename-preview]').textContent, /预览/);
+  assert.equal(content.querySelector('.bili-frame-filename-settings-heading').textContent, '图片文件名模板');
+  assert.match(document.querySelector('#bili-frame-styles')?.textContent || '', /\.bili-frame-filename-template-input/);
+  assert.match(document.querySelector('#bili-frame-styles')?.textContent || '', /\.bili-frame-filename-placeholder/);
+  assert.match(document.querySelector('#bili-frame-styles')?.textContent || '', /\.bili-frame-filename-actions/);
+  assert.match(document.querySelector('#bili-frame-styles')?.textContent || '', /\.bili-frame-filename-preview/);
+  dialog.dispatchEvent(new FakeEvent('keydown', { key: 'Escape', code: 'Escape' }));
+  assert.equal(document.body.querySelector('[data-bili-frame-filename-settings]'), null);
+  api.open();
+  api.open();
+  assert.equal(document.body.querySelectorAll('[data-bili-frame-filename-settings]').length, 1);
+});
+
+test('mounted media actions read a changed filename template on the next click', () => {
+  const { document } = createDom();
+  const video = { readyState: 4, videoWidth: 640, videoHeight: 360, currentTime: 1, ownerDocument: document };
+  const canvas = { getContext: () => ({ drawImage() {} }), toDataURL: () => 'data:image/png;base64,frame' };
+  let template = '{{title}}-old';
+  const actions = createMediaActions({ document, video, title: '标题', identity: 'BV1ABC', canvas, getFilenameTemplate: () => template, adapters: {} });
+  assert.equal(actions.capture().filename, '标题-old.png');
+  template = '{{title}}-new';
+  assert.equal(actions.capture().filename, '标题-new.png');
+});
+
+test('filename menu accepts raw GM injections and only unregisters valid command ids', () => {
+  const { document } = createDom();
+  const calls = [];
+  const raw = {
+    GM_registerMenuCommand: (_label, callback) => { calls.push(callback); return undefined; },
+    GM_unregisterMenuCommand: (id) => calls.push(id),
+  };
+  const api = createFilenameSettingsMenu(document, { adapters: raw });
+  api.destroy();
+  assert.equal(calls.length, 1);
+  assert.equal(typeof calls[0], 'function');
 });
 
 test('captureCurrentFrame reports unready, zero-size, and tainted-canvas failures', () => {
