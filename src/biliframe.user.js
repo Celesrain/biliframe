@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BiliFrame - 哔哩哔哩逐帧与截图工具
 // @namespace    https://github.com/Celesrain/biliframe
-// @version      0.1.0
+// @version      0.1.1
 // @description  为哔哩哔哩播放器添加逐帧前进/后退、当前帧截图和原始封面查看下载功能。
 // @author       Celesrain
 // @license      MIT
@@ -265,10 +265,10 @@
     }
 
     const definitions = [
-      ['previous', '上一帧', 'Alt+,', '<path d="M15 5 8 12l7 7"/><path d="M8 12h10"/>'],
-      ['next', '下一帧', 'Alt+.', '<path d="m9 5 7 7-7 7"/><path d="M16 12H6"/>'],
-      ['capture', '截取当前帧', 'Alt+click', '<rect x="4" y="6" width="16" height="13" rx="2"/><circle cx="12" cy="12.5" r="3"/><path d="M8 6 9.5 4h5L16 6"/>'],
-      ['cover', '查看封面', 'Alt+click', '<rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m5 17 4-4 3 3 2-2 5 4"/>'],
+      ['previous', '上一帧', 'Alt+,', '<path d="M16.5 3.5 7 12l9.5 8.5"/><path d="M7 12h14"/>'],
+      ['next', '下一帧', 'Alt+.', '<path d="m7.5 3.5 9.5 8.5-9.5 8.5"/><path d="M17 12H3"/>'],
+      ['capture', '截取当前画面', '', '<rect x="2.5" y="5" width="19" height="16.5" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M7 5 9 2.5h6L17 5"/>'],
+      ['cover', '查看视频封面', '', '<rect x="2.5" y="2.5" width="19" height="19" rx="2.5"/><circle cx="8.5" cy="8.5" r="2"/><path d="m3.5 18 5-5 3.5 3.5 2.5-2.5 6 5"/>'],
     ];
     const controls = definitions.map(([actionName, label, shortcut, icon]) => {
       const control = host.ownerDocument.createElement('button');
@@ -284,7 +284,7 @@
       const invoke = (event) => {
         event.stopPropagation();
         if (typeof actions[actionName] === 'function') {
-          actions[actionName]();
+          actions[actionName](control, event);
         } else if (typeof actions[actionName] === 'number') {
           actions[actionName] += 1;
         }
@@ -438,21 +438,31 @@
     };
 
     const open = (nextCoverUrl = options.coverUrl || options.url, opener = options.opener) => {
-      const coverUrl = normalizeCoverUrl(nextCoverUrl);
+      const kind = options.kind === 'frame' ? 'frame' : 'cover';
+      const coverUrl = kind === 'cover'
+        ? normalizeCoverUrl(nextCoverUrl)
+        : String(nextCoverUrl || '');
       if (!coverUrl || !document?.body) return null;
       if (state?.modal) close();
 
       const modal = document.createElement('div');
       modal.className = 'bili-frame-modal';
       modal.setAttribute('role', 'dialog');
-      modal.setAttribute('aria-label', 'BiliFrame 封面');
-      modal.setAttribute('data-bili-frame-modal', 'cover');
+      modal.setAttribute(
+        'aria-label',
+        options.dialogLabel || (kind === 'frame' ? 'BiliFrame 当前画面预览' : 'BiliFrame 视频封面预览'),
+      );
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('tabindex', '-1');
+      modal.setAttribute('data-bili-frame-modal', kind);
       const image = document.createElement('img');
       image.className = 'bili-frame-modal-image';
       image.setAttribute('src', coverUrl);
-      image.setAttribute('alt', '原始封面');
+      image.setAttribute('alt', options.alt || (kind === 'frame' ? '截取的当前画面' : '视频原始封面'));
       const extension = coverUrl.match(/\.([a-z0-9]{1,10})(?:[?#]|$)/i)?.[1] || 'jpg';
-      const filename = sanitizeFilename(`${options.title || DEFAULT_FILENAME}.${extension}`);
+      const filename = options.filename
+        ? sanitizeFilename(options.filename)
+        : sanitizeFilename(`${options.title || DEFAULT_FILENAME}.${extension}`);
       const filenameNode = document.createElement('div');
       filenameNode.className = 'bili-frame-modal-filename';
       filenameNode.setAttribute('data-bili-frame-modal-filename', 'true');
@@ -480,10 +490,15 @@
       };
       const buttons = document.createElement('div');
       buttons.className = 'bili-frame-modal-actions';
+      const actionItems = Array.isArray(options.actionItems)
+        ? options.actionItems
+        : [
+            { name: 'download', label: '下载原图', callback: actions.download },
+            { name: 'open', label: '打开原图', callback: actions.open },
+            { name: 'copy', label: '复制图片地址', callback: actions.copy },
+          ];
       buttons.append(
-        makeAction('download', '下载原图', actions.download),
-        makeAction('open', '打开原图', actions.open),
-        makeAction('copy', '复制图片地址', actions.copy),
+        ...actionItems.map((item) => makeAction(item.name, item.label, item.callback)),
         makeAction('close', '关闭', null),
       );
       modal.append(content, buttons);
@@ -496,6 +511,7 @@
       state = { modal, opener };
       coverModalStates.set(document, state);
       document.body.appendChild(modal);
+      buttons.querySelector?.('[data-bili-frame-modal-action]')?.focus?.();
       return modal;
     };
 
@@ -533,7 +549,11 @@
   function captureCurrentFrame(video, options = {}) {
     const report = typeof options.onStatus === 'function' ? options.onStatus : () => {};
     if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
-      const status = { ok: false, reason: 'unready-video' };
+      const status = {
+        ok: false,
+        reason: 'unready-video',
+        message: '视频画面尚未准备好，请稍后重试',
+      };
       report(status);
       return status;
     }
@@ -551,16 +571,21 @@
         identity: options.identity,
         coverUrl: '.png',
       });
-      if (!options.adapters?.download?.({ url: dataUrl, name: filename, saveAs: true })) {
-        const status = { ok: false, reason: 'download-failed', dataUrl, filename };
-        report(status);
-        return status;
-      }
-      const status = { ok: true, dataUrl, filename };
+      const status = {
+        ok: true,
+        type: 'frame-captured',
+        dataUrl,
+        filename,
+        message: '已截取当前画面',
+      };
       report(status);
       return status;
     } catch {
-      const status = { ok: false, reason: 'canvas-failed' };
+      const status = {
+        ok: false,
+        reason: 'canvas-failed',
+        message: '截图失败，视频源或浏览器可能禁止画布导出',
+      };
       report(status);
       return status;
     }
@@ -574,30 +599,130 @@
       report(status);
       return status;
     }
-    const status = { ok: true, url };
+    const status = { ok: true, url, message: '已复制当前时间链接' };
     report(status);
     return status;
   }
 
   function createMediaActions(options = {}) {
     const adapters = options.adapters || createUserscriptAdapters(options.root);
+    const getVideo = () => options.getVideo?.() || options.video;
+    const getDocument = () => options.document || getVideo()?.ownerDocument;
+    const report = typeof options.onStatus === 'function' ? options.onStatus : () => {};
+
+    const adapterAction = (name, argument, successMessage, failureReason) => {
+      const ok = Boolean(adapters[name]?.(argument));
+      const status = ok
+        ? { ok: true, type: name, message: successMessage }
+        : { ok: false, reason: failureReason, message: `无法完成：${successMessage}` };
+      report(status);
+      return status;
+    };
+
+    const copyTimestamp = () => copyTimestampLink(
+      options.pageUrl,
+      getVideo()?.currentTime ?? options.seconds,
+      adapters,
+      report,
+    );
+
     return {
-      capture: () => captureCurrentFrame(options.getVideo?.() || options.video, { ...options, adapters }),
-      copyTimestamp: () => copyTimestampLink(
-        options.pageUrl,
-        options.getVideo?.()?.currentTime ?? options.seconds,
-        adapters,
-        options.onStatus,
-      ),
-      cover: (url = options.coverUrl) => {
-        if (!url) {
-          const status = { ok: false, reason: 'missing-cover' };
-          options.onStatus?.(status);
+      capture: (opener) => {
+        const result = captureCurrentFrame(getVideo(), {
+          ...options,
+          adapters: undefined,
+          onStatus: undefined,
+        });
+        if (!result.ok) {
+          report(result);
+          return result;
+        }
+        const modalApi = createCoverModal(getDocument(), {
+          kind: 'frame',
+          filename: result.filename,
+          actionItems: [
+            {
+              name: 'download',
+              label: '下载截图',
+              callback: (url, filename) => adapterAction(
+                'download',
+                { url, name: filename, saveAs: true },
+                '已请求下载截图',
+                'download-failed',
+              ),
+            },
+            {
+              name: 'copy-time',
+              label: '复制当前时间链接',
+              callback: copyTimestamp,
+            },
+          ],
+        });
+        const modal = modalApi.open(result.dataUrl, opener);
+        if (!modal) {
+          const status = { ok: false, reason: 'preview-failed', message: '无法显示截图预览' };
+          report(status);
           return status;
         }
-        if (adapters.open?.(url)) return { ok: true, url };
-        const status = { ok: false, reason: 'open-failed', url };
-        options.onStatus?.(status);
+        const status = {
+          ...result,
+          preview: true,
+          message: '已截取当前画面，可在预览中查看或下载',
+        };
+        report(status);
+        return status;
+      },
+      copyTimestamp,
+      cover: (urlOrOpener) => {
+        const explicitUrl = typeof urlOrOpener === 'string' ? urlOrOpener : '';
+        const opener = explicitUrl ? options.opener : urlOrOpener;
+        const document = getDocument();
+        const url = normalizeCoverUrl(
+          explicitUrl || options.coverUrl || resolveCoverUrl(document),
+        );
+        if (!url) {
+          const status = { ok: false, reason: 'missing-cover', message: '未找到视频封面' };
+          report(status);
+          return status;
+        }
+        const filename = buildCoverFilename({
+          title: options.title,
+          identity: options.identity,
+          coverUrl: url,
+        });
+        const modalApi = createCoverModal(document, {
+          kind: 'cover',
+          title: options.title,
+          filename,
+          actions: {
+            download: (imageUrl, imageFilename) => adapterAction(
+              'download',
+              { url: imageUrl, name: imageFilename, saveAs: true },
+              '已请求下载视频封面',
+              'download-failed',
+            ),
+            open: (imageUrl) => adapterAction(
+              'open', imageUrl, '已打开视频封面', 'open-failed',
+            ),
+            copy: (imageUrl) => adapterAction(
+              'copy', imageUrl, '已复制封面地址', 'clipboard-failed',
+            ),
+          },
+        });
+        const modal = modalApi.open(url, opener);
+        if (!modal) {
+          const status = { ok: false, reason: 'preview-failed', message: '无法显示封面预览' };
+          report(status);
+          return status;
+        }
+        const status = {
+          ok: true,
+          type: 'cover-preview',
+          preview: true,
+          url,
+          message: '已打开视频封面预览',
+        };
+        report(status);
         return status;
       },
     };
@@ -614,16 +739,16 @@
 .bili-frame-control { width:36px; height:22px; min-width:30px; padding:0; border:0; background:transparent; color:#fff; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:background-color .15s ease,opacity .15s ease; }
 .bili-frame-control:hover, .bili-frame-control:focus-visible { background:rgba(255,255,255,.16); outline:none; }
 .bili-frame-control:disabled { opacity:.45; cursor:default; }
-.bili-frame-icon { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+.bili-frame-icon { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.35; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
 .bili-frame-status { position:fixed; z-index:2147483646; right:16px; bottom:64px; max-width: min(360px, calc(100vw - 32px)); padding:6px 10px; border-radius:999px; color:#fff; background:rgba(20,20,24,.88); font:12px/1.4 sans-serif; pointer-events:none; }
 .bili-frame-status-success { background:rgba(24,120,70,.92); } .bili-frame-status-error { background:rgba(170,45,45,.94); }
-.bili-frame-modal { position:fixed; inset:0; z-index:2147483645; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(0,0,0,.68); color:#fff; }
+.bili-frame-modal { position:fixed; inset:0; z-index:2147483645; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; background:rgba(0,0,0,.72); color:#fff; }
 .bili-frame-modal-content { max-width:min(92vw,1200px); max-height:82vh; overflow:auto; text-align:center; background:rgba(24,24,28,.96); padding:16px; border-radius:8px; }
 .bili-frame-modal-image { display:block; max-width:100%; max-height:68vh; object-fit:contain; }
-.bili-frame-modal-filename { margin-top:8px; overflow-wrap:anywhere; } .bili-frame-modal-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:12px; }
+.bili-frame-modal-filename { margin-top:8px; overflow-wrap:anywhere; } .bili-frame-modal-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:12px; padding:10px 12px; border-radius:8px; background:rgba(24,24,28,.96); }
 .bili-frame-modal-action { min-height:32px; padding:6px 12px; border:1px solid rgba(255,255,255,.35); border-radius:4px; color:#fff; background:rgba(255,255,255,.1); cursor:pointer; }
 .bili-frame-modal-action:hover, .bili-frame-modal-action:focus-visible { background:rgba(255,255,255,.22); outline:2px solid currentColor; outline-offset:2px; }
-@media (max-width:560px) { .bili-frame-control { width:30px; min-width:30px; } .bili-frame-modal { padding:12px; } }
+@media (max-width:560px) { .bili-frame-control { width:30px; min-width:30px; } .bili-frame-icon { width:20px; height:20px; } .bili-frame-modal { padding:12px; } }
 @media (prefers-reduced-motion: reduce) { .bili-frame-control { transition:none; } }
 @media (min-width:900px) { .bili-frame-modal-content { max-width:min(80vw,1400px); } }
 @media (display-mode: fullscreen) { .bili-frame-status { bottom:80px; } }
@@ -646,8 +771,10 @@
       const success = status?.ok !== false;
       node.className = `bili-frame-status ${success ? 'bili-frame-status-success' : 'bili-frame-status-error'}`;
       node.textContent = status?.message || (success ? 'BiliFrame 操作完成' : 'BiliFrame 操作失败');
-      if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(() => { if (node) node.hidden = true; }, options.duration ?? 2400);
+      const cancelTimer = options.clearTimeout || clearTimeout;
+      const startTimer = options.setTimeout || setTimeout;
+      if (timer !== null) cancelTimer(timer);
+      timer = startTimer(() => { if (node) node.hidden = true; }, options.duration ?? 3200);
       node.hidden = false;
       return node;
     };
@@ -678,6 +805,13 @@
     let started = false;
     let destroyed = false;
     let historyRestore = null;
+    const statusPresenter = options.statusPresenter || createStatusPresenter(document, {
+      setTimeout: root.setTimeout,
+      clearTimeout: root.clearTimeout,
+    });
+    const reportStatus = typeof options.onStatus === 'function'
+      ? options.onStatus
+      : statusPresenter.show;
 
     const schedule = () => {
       if (destroyed) return;
@@ -702,8 +836,12 @@
       const mediaActions = createMediaActions({
         ...options,
         adapters: options.adapters || createUserscriptAdapters(root),
+        document,
         video,
         pageUrl: options.pageUrl || root.location?.href || '',
+        title: options.title || document.title || DEFAULT_FILENAME,
+        identity: options.identity || root.location?.pathname?.match(/(?:BV[\w]+|ep\d+)/i)?.[0] || '',
+        onStatus: reportStatus,
       });
       mounted = mountControls(adapter, {
         previous: stepAction.previous,
@@ -716,7 +854,11 @@
 
     const stepAction = createFrameStepAction(() => activeVideo, {
       clock: frameClock,
-      onStatus: options.onStatus,
+      onStatus: (status) => reportStatus({
+        ...status,
+        ok: true,
+        message: `${status.direction < 0 ? '上一帧' : '下一帧'}：${formatTimestamp(status.time, ':')}（约 ${status.fps.toFixed(2)} FPS）`,
+      }),
     });
 
     const onShortcut = (event) => {

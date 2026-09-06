@@ -46,9 +46,9 @@ Four icon buttons are inserted immediately after the native play/pause button:
 3. Current-frame PNG capture
 4. Cover preview
 
-The buttons reuse the native control class and dimensions, but all custom styling is namespaced under `bili-frame-*`. Each button has `role="button"`, `tabindex="0"`, an `aria-label`, a title with its shortcut, and keyboard activation for Enter/Space.
+The buttons reuse the native control class and dimensions, but all custom styling is namespaced under `bili-frame-*`. Each button has `role="button"`, `tabindex="0"`, an `aria-label`, a descriptive title, and keyboard activation for Enter/Space. Only the previous/next-frame titles advertise shortcuts; capture and cover are direct-click controls.
 
-A small status pill reports pause/seek time, measured FPS, saves, copies, and actionable failures. The cover opens in a keyboard-dismissible modal with:
+A small status pill reports pause/seek time, measured FPS, preview creation, saves, copies, and actionable failures. Both image controls use a keyboard-dismissible, preview-first modal. The current-frame modal provides Download screenshot and Copy current-time URL; the cover modal provides:
 
 - the original-resolution image suitable for right-click saving;
 - a filename preview;
@@ -81,9 +81,9 @@ Cover resolution order:
 
 Bilibili's trailing `@...` image transformation is removed only from recognized image-path suffixes. Query strings and ordinary `@` characters are preserved.
 
-Cover download is user-triggered through `GM_download` and limited by metadata to `hdslb.com` (including its subdomains). If the userscript manager cannot download directly, BiliFrame opens the original image so the browser can save it normally.
+Clicking either image control first opens a visible preview and performs no download, tab opening, or clipboard write. Cover download is user-triggered through `GM_download` and limited by metadata to `hdslb.com` (including its subdomains). If the userscript manager cannot download directly, BiliFrame can open the original image so the browser can save it normally.
 
-Current-frame capture draws the displayed video frame to a canvas at `videoWidth × videoHeight`, saves a PNG with the BV/episode title and timestamp, and reports cross-origin/canvas failures instead of silently doing nothing.
+Current-frame capture draws the displayed video frame to a canvas at `videoWidth × videoHeight`, shows the resulting PNG in the shared preview, and downloads it only after the user clicks Download screenshot. The filename uses the title plus BV/episode identity. Cross-origin/canvas failures are reported visibly instead of silently doing nothing.
 
 ## Navigation and lifecycle
 
@@ -97,7 +97,7 @@ Current-frame capture draws the displayed video frame to a canvas at `videoWidth
 ## Privacy and permissions
 
 - No analytics, telemetry, cookies, storage, account data, or background network requests.
-- `GM_download` is used only after the user clicks Download original.
+- `GM_download` is used only after the user clicks Download screenshot or Download original in a preview.
 - `GM_setClipboard` is used only after the user clicks a copy action.
 - `GM_openInTab` is used only after the user clicks Open original.
 - No page globals, credentials, or private Bilibili APIs are read.

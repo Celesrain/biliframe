@@ -8,7 +8,7 @@
 - [x] `npm test`；日期：2026-09-06；结果：通过，40/40 测试通过，0 失败。
 - [x] `npm run verify`；日期：2026-09-06；结果：通过；依次完成 `npm run check` 与 `npm test`，40/40 测试通过。
 - [x] `git add -N -- .; git diff --check; git reset -- .`；日期：2026-09-06；结果：通过；包含未跟踪新增文件的 diff 检查无空白错误，随后已安全取消暂存且未丢弃改动。
-- [x] 用户脚本元数据；日期：2026-09-06；结果：通过；`@name` 为 `BiliFrame - 哔哩哔哩逐帧与截图工具`，namespace 为 `https://github.com/Celesrain/biliframe`，version 为 `0.1.0`，author 为 `Celesrain`，license 为 `MIT`；恰有 5 个 desktop `@match`（video、bangumi/play、medialist/play、list/watchlater、festival），恰有 3 个 grants（`GM_download`、`GM_openInTab`、`GM_setClipboard`），恰有 `@connect hdslb.com`，`@run-at` 为 `document-start`。
+- [x] 用户脚本元数据；日期：2026-09-06；结果：通过；`@name` 为 `BiliFrame - 哔哩哔哩逐帧与截图工具`，namespace 为 `https://github.com/Celesrain/biliframe`，version 为 `0.1.1`，author 为 `Celesrain`，license 为 `MIT`；恰有 5 个 desktop `@match`（video、bangumi/play、medialist/play、list/watchlater、festival），恰有 3 个 grants（`GM_download`、`GM_openInTab`、`GM_setClipboard`），恰有 `@connect hdslb.com`，`@run-at` 为 `document-start`。
 - [x] 风险关键词与选择器审计；日期：2026-09-06；结果：通过；在 `src/` 中未发现 `fetch`、`XMLHttpRequest`、`WebSocket`、`sendBeacon`、analytics/telemetry、cookie、localStorage、unsafeWindow、`eval`、TODO/FIXME；仅有预期的 `GM_*` 用户触发适配器。样式规则均使用 `bili-frame-` 命名空间；播放器/媒体查询使用 DESIGN 记录的原生选择器。未发现宽泛 `@connect`。
 
 自动化边界：上述检查覆盖 Node 语法、Node/UI 集成测试、用户脚本元数据、静态网络/全局/样式审计；未安装或执行用户脚本，也未验证真实浏览器、Bilibili 页面、Tampermonkey API 或 live DOM。
@@ -79,3 +79,14 @@
 - **已验证**：一次桌面 `/video/*` 页面样本的 live DOM 结构、媒体可用性/内禀尺寸、控制栏与原生按钮几何、Open Graph 封面及处理后缀归一化预期。
 - **另行验证**：Node fake-DOM integration 属于本地测试层，不等于真实浏览器或 Tampermonkey 行为。
 - **未执行**：Tampermonkey runtime E2E；未安装或执行 userscript，未验证 GM API、真实四按钮交互、截图导出、下载/打开/剪贴板操作或 SPA 重挂载。
+
+## 8. v0.1.1 交互修复验证（2026-09-06）
+
+- [x] `npm run verify`；结果：通过；语法检查通过，42/42 测试通过，0 失败。
+- [x] `git diff --check`；结果：通过；无空白错误。
+- [x] 直接单击语义；结果：通过；截图和封面按钮的 title/accessible name 不再包含 `Alt+click`，`Alt+,` 与 `Alt+.` 只保留给逐帧操作。
+- [x] 预览优先行为；结果：通过；Node/UI 集成测试确认单击截图和封面按钮均先创建可见模态框，在用户点击模态框操作前不会调用下载、打开标签页或剪贴板适配器。
+- [x] 图标尺寸；结果：通过；默认图标由 `16×16px` 增至 `22×22px`、加强描边，窄屏使用 `20×20px`，原生 `36×22px` 按钮占位保持不变。
+- [x] 本地浏览器视觉检查；结果：通过；在 in-app 浏览器的 Bilibili 风格测试页中确认四按钮排列清楚；截图预览显示 `1280×720` 示例画面及“下载截图”“复制当前时间链接”“关闭”，封面预览显示原图及“下载原图”“打开原图”“复制图片地址”“关闭”。
+
+验证边界：本节视觉检查使用加载真实 userscript 源码的本地测试页，不是 Tampermonkey 在真实 Bilibili 页中的运行时 E2E；实际用户脚本安装、GM API 和 live SPA 重挂载仍须按第 4 节验收。

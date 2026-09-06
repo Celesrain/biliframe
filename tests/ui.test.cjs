@@ -74,13 +74,18 @@ test('mount inserts four accessible controls in order and is idempotent', () => 
   const result = mountControls(findPlayerAdapter(fixture.document), actions);
   assert.deepEqual(
     result.controls.map((control) => control.getAttribute('aria-label')),
-    ['上一帧', '下一帧', '截取当前帧', '查看封面'],
+    ['上一帧', '下一帧', '截取当前画面', '查看视频封面'],
   );
   result.controls.forEach((control) => {
     assert.equal(control.getAttribute('role'), 'button');
     assert.equal(control.getAttribute('tabindex'), '0');
-    assert.match(control.getAttribute('title'), /Alt/);
   });
+  assert.equal(result.controls[0].getAttribute('title'), '上一帧（Alt+,）');
+  assert.equal(result.controls[1].getAttribute('title'), '下一帧（Alt+.）');
+  assert.equal(result.controls[2].getAttribute('title'), '截取当前画面');
+  assert.equal(result.controls[3].getAttribute('title'), '查看视频封面');
+  assert.doesNotMatch(result.controls[2].getAttribute('title'), /Alt|click/i);
+  assert.doesNotMatch(result.controls[3].getAttribute('title'), /Alt|click/i);
   assert.deepEqual(fixture.left.children.slice(1), result.controls);
   assert.equal(mountControls(findPlayerAdapter(fixture.document), actions).controls.length, 4);
   assert.equal(fixture.left.children.length, 5);
@@ -251,7 +256,8 @@ test('media actions stay explicit and report adapter/canvas outcomes', () => {
   const video = { readyState: 4, videoWidth: 640, videoHeight: 360 };
   const capture = captureCurrentFrame(video, { canvas, adapters, title: '截图' });
   assert.equal(capture.ok, true);
-  assert.equal(downloadCalls, 1);
+  assert.equal(capture.dataUrl, 'data:image/png;base64,fake');
+  assert.equal(downloadCalls, 0);
   assert.equal(copyTimestampLink('https://www.bilibili.com/video/BV1', 2, adapters).ok, true);
   const failures = [];
   assert.equal(captureCurrentFrame({ readyState: 0 }, { adapters, onStatus: (s) => failures.push(s) }).reason, 'unready-video');
@@ -306,7 +312,7 @@ test('cover filenames support BV, episode, ordinary identities, source extension
   assert.ok(safe.endsWith('.png'));
 });
 
-test('captureCurrentFrame sizes intrinsic canvas, draws, exports PNG, and downloads the safe filename', () => {
+test('captureCurrentFrame sizes intrinsic canvas and returns a preview payload without downloading', () => {
   const operations = [];
   const canvas = {
     width: 0,
@@ -328,10 +334,12 @@ test('captureCurrentFrame sizes intrinsic canvas, draws, exports PNG, and downlo
     ['drawImage', video, 0, 0, 1920, 1080],
     ['toDataURL', 'image/png'],
   ]);
-  assert.deepEqual(downloads, [{ url: 'data:image/png;base64,frame', name: '标题 - BV1.png', saveAs: true }]);
+  assert.deepEqual(downloads, []);
+  assert.equal(result.dataUrl, 'data:image/png;base64,frame');
+  assert.equal(result.filename, '标题 - BV1.png');
 });
 
-test('captureCurrentFrame reports unready, zero-size, tainted, and rejected-download failures', () => {
+test('captureCurrentFrame reports unready, zero-size, and tainted-canvas failures', () => {
   const statuses = [];
   const base = { canvas: { getContext: () => ({ drawImage() {} }), toDataURL: () => 'data:x' } };
   assert.equal(captureCurrentFrame({ readyState: 1, videoWidth: 640, videoHeight: 360 }, { ...base, onStatus: (s) => statuses.push(s) }).reason, 'unready-video');
@@ -341,14 +349,8 @@ test('captureCurrentFrame reports unready, zero-size, tainted, and rejected-down
     onStatus: (s) => statuses.push(s),
   });
   assert.equal(tainted.reason, 'canvas-failed');
-  const rejected = captureCurrentFrame({ readyState: 4, videoWidth: 640, videoHeight: 360 }, {
-    ...base,
-    adapters: { download: () => false },
-    onStatus: (s) => statuses.push(s),
-  });
-  assert.equal(rejected.reason, 'download-failed');
-  assert.deepEqual(statuses.map((status) => status.reason), [
-    'unready-video', 'unready-video', 'canvas-failed', 'download-failed',
+  assert.deepEqual(statuses.map((status) => status.reason).filter(Boolean), [
+    'unready-video', 'unready-video', 'canvas-failed',
   ]);
 });
 
@@ -366,11 +368,71 @@ test('copyTimestampLink builds the exact URL and copies only when explicitly cal
   assert.deepEqual(statuses, [result]);
 });
 
-test('media actions make no external calls at construction and report explicit failures', () => {
+test('capture and cover actions show operable previews before downstream operations', () => {
+  const { document } = createDom();
+  const opener = document.createElement('button');
+  document.body.appendChild(opener);
+  const calls = [];
+  const statuses = [];
+  const video = {
+    readyState: 4,
+    videoWidth: 640,
+    videoHeight: 360,
+    currentTime: 65.432,
+    ownerDocument: document,
+  };
+  const actions = createMediaActions({
+    document,
+    video,
+    title: '演示视频',
+    identity: 'BV1TEST',
+    pageUrl: 'https://www.bilibili.com/video/BV1TEST',
+    coverUrl: 'https://i0.hdslb.com/bfs/archive/cover.jpg@1200w',
+    canvas: {
+      getContext: () => ({ drawImage() {} }),
+      toDataURL: () => 'data:image/png;base64,frame-preview',
+    },
+    adapters: {
+      download: (details) => { calls.push(['download', details]); return true; },
+      open: (url) => { calls.push(['open', url]); return true; },
+      copy: (text) => { calls.push(['copy', text]); return true; },
+    },
+    onStatus: (status) => statuses.push(status),
+  });
+
+  assert.deepEqual(calls, []);
+  const capture = actions.capture(opener);
+  assert.equal(capture.ok, true);
+  assert.equal(capture.preview, true);
+  let modal = document.body.querySelector('[data-bili-frame-modal="frame"]');
+  assert.ok(modal);
+  assert.equal(modal.querySelector('img').getAttribute('src'), 'data:image/png;base64,frame-preview');
+  assert.deepEqual(calls, []);
+  modal.querySelector('[data-bili-frame-modal-action="download"]').click();
+  assert.equal(calls[0][0], 'download');
+  assert.equal(calls[0][1].name, '演示视频 - BV1TEST.png');
+
+  const cover = actions.cover(opener);
+  assert.equal(cover.ok, true);
+  assert.equal(cover.preview, true);
+  modal = document.body.querySelector('[data-bili-frame-modal="cover"]');
+  assert.ok(modal);
+  assert.equal(modal.querySelector('img').getAttribute('src'), 'https://i0.hdslb.com/bfs/archive/cover.jpg');
+  assert.equal(calls.length, 1);
+  modal.querySelector('[data-bili-frame-modal-action="download"]').click();
+  modal.querySelector('[data-bili-frame-modal-action="open"]').click();
+  modal.querySelector('[data-bili-frame-modal-action="copy"]').click();
+  assert.deepEqual(calls.map(([kind]) => kind), ['download', 'download', 'open', 'copy']);
+  assert.ok(statuses.some((status) => status.message?.includes('预览')));
+});
+
+test('media actions keep input and adapter failures visible', () => {
+  const { document } = createDom();
   const calls = [];
   const statuses = [];
   const video = { readyState: 1, videoWidth: 640, videoHeight: 360, currentTime: 2 };
   const actions = createMediaActions({
+    document,
     video,
     pageUrl: 'https://www.bilibili.com/video/BV1',
     coverUrl: '',
@@ -385,7 +447,11 @@ test('media actions make no external calls at construction and report explicit f
   assert.equal(actions.cover().reason, 'missing-cover');
   assert.equal(actions.capture().reason, 'unready-video');
   assert.equal(actions.copyTimestamp().reason, 'clipboard-failed');
-  assert.equal(actions.cover('https://i.hdslb.com/a.jpg').reason, 'open-failed');
+  assert.equal(actions.cover('https://i.hdslb.com/a.jpg').ok, true);
+  assert.deepEqual(calls, ['copy']);
+  document.body
+    .querySelector('[data-bili-frame-modal-action="open"]')
+    .click();
   assert.deepEqual(calls, ['copy', 'open']);
   const failingCanvasActions = createMediaActions({
     video: { readyState: 4, videoWidth: 640, videoHeight: 360 },
@@ -397,16 +463,8 @@ test('media actions make no external calls at construction and report explicit f
     onStatus: (status) => statuses.push(status),
   });
   assert.equal(failingCanvasActions.capture().reason, 'canvas-failed');
-  const failingDownloadActions = createMediaActions({
-    video: { readyState: 4, videoWidth: 640, videoHeight: 360 },
-    canvas: { getContext: () => ({ drawImage() {} }), toDataURL: () => 'data:x' },
-    adapters: { download: () => false },
-    onStatus: (status) => statuses.push(status),
-  });
-  assert.equal(failingDownloadActions.capture().reason, 'download-failed');
-  assert.deepEqual(statuses.map((status) => status.reason), [
-    'missing-cover', 'unready-video', 'clipboard-failed', 'open-failed',
-    'canvas-failed', 'download-failed',
+  assert.deepEqual(statuses.map((status) => status.reason).filter(Boolean), [
+    'missing-cover', 'unready-video', 'clipboard-failed', 'open-failed', 'canvas-failed',
   ]);
 });
 
@@ -461,10 +519,59 @@ test('styles and controls are namespaced, idempotent, accessible, and icon-backe
   assert.equal(first, second);
   assert.equal(fixture.document.documentElement.querySelectorAll('#bili-frame-styles').length, 1);
   assert.match(first.textContent, /\.bili-frame-control/);
+  assert.match(first.textContent, /\.bili-frame-icon\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
   assert.match(first.textContent, /prefers-reduced-motion/);
   assert.doesNotMatch(first.textContent, /(^|\n)\s*\.bpx-player/);
   const controls = mountControls(findPlayerAdapter(fixture.document), {}).controls;
   assert.ok(controls.every((control) => control.innerHTML.includes('<svg')));
+});
+
+test('lifecycle control clicks open visible frame and cover previews with default status', () => {
+  const fixture = playerFixture();
+  const video = fixture.document.createElement('video');
+  Object.assign(video, {
+    readyState: 4,
+    duration: 120,
+    currentTime: 12.5,
+    videoWidth: 640,
+    videoHeight: 360,
+    clientWidth: 640,
+    clientHeight: 360,
+    pause() {},
+  });
+  fixture.videoWrap.appendChild(video);
+  const externalCalls = [];
+  const harness = lifecycleHarness(fixture, {
+    title: '生命周期测试',
+    identity: 'BV1LIFE',
+    coverUrl: 'https://i0.hdslb.com/bfs/archive/life.jpg@1200w',
+    canvas: {
+      getContext: () => ({ drawImage() {} }),
+      toDataURL: () => 'data:image/png;base64,lifecycle-frame',
+    },
+    adapters: {
+      download: (details) => { externalCalls.push(['download', details]); return true; },
+      open: (url) => { externalCalls.push(['open', url]); return true; },
+      copy: (text) => { externalCalls.push(['copy', text]); return true; },
+    },
+  });
+
+  harness.controller.ensure();
+  const controls = harness.controller.getMounted().controls;
+  controls[2].click();
+  assert.ok(fixture.document.body.querySelector('[data-bili-frame-modal="frame"]'));
+  assert.match(fixture.document.body.querySelector('.bili-frame-status').textContent, /预览/);
+  assert.deepEqual(externalCalls, []);
+
+  controls[3].click();
+  const coverModal = fixture.document.body.querySelector('[data-bili-frame-modal="cover"]');
+  assert.ok(coverModal);
+  assert.equal(
+    coverModal.querySelector('img').getAttribute('src'),
+    'https://i0.hdslb.com/bfs/archive/life.jpg',
+  );
+  assert.deepEqual(externalCalls, []);
+  harness.controller.destroy();
 });
 
 function lifecycleHarness(fixture, options = {}) {
