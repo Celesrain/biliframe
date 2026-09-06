@@ -4,7 +4,7 @@ BiliFrame 是面向桌面端哔哩哔哩 HTML5 播放器的 Tampermonkey 用户�
 
 > 本项目主要由 GPT 完成，并经过人工审查。
 
-项目名为 **BiliFrame**，仓库名为 `biliframe`，当前版本为 `0.1.3`。源代码与发行版发布于 [Celesrain/biliframe](https://github.com/Celesrain/biliframe)。
+项目名为 **BiliFrame**，仓库名为 `biliframe`，当前版本为 `0.2.0`。源代码与发行版发布于 [Celesrain/biliframe](https://github.com/Celesrain/biliframe)。
 
 ## 功能
 
@@ -60,6 +60,21 @@ BiliFrame 是面向桌面端哔哩哔哩 HTML5 播放器的 Tampermonkey 用户�
 
 单击截图或封面按钮只生成并显示预览，不会立即下载或打开新页面。预览使用浏览器原生模态层，因此在普通、网页全屏和浏览器原生全屏下都会位于播放器上方。预览窗口中的“下载截图”“复制当前时间链接”“下载原图”“打开原图”和“复制图片地址”都必须由用户再次主动点击触发；操作结果会直接显示在窗口内。
 
+### 图片文件名模板
+
+可在 Tampermonkey 用户脚本菜单中打开 BiliFrame 的图片名设置，输入保存图片时使用的模板。模板支持以下占位符：
+
+| 占位符 | 含义 |
+| --- | --- |
+| `{{title}}` | 视频标题 |
+| `{{bvid}}` | 视频 BV 号 |
+| `{{timestamp}}` | 当前播放时间（含时分秒） |
+| `{{date}}` | 当前日期 |
+| `{{time}}` | 当前时间 |
+| `{{kind}}` | 图片类型，实际值为 `frame` 或 `cover` |
+
+例如，`{{title}}_{{timestamp}}` 可生成按视频标题和播放时间命名的截图，`{{bvid}}_{{kind}}_{{date}}` 可区分同一视频的截图和封面。扩展名会按图片类型自动追加；Windows 文件名中的非法字符会自动清理。设置保存在 Tampermonkey 的脚本菜单配置中，保存后对当前会话后续下载立即生效，也可以在菜单中恢复默认模板。
+
 ## 权限与隐私
 
 脚本声明的权限及用途如下：
@@ -67,8 +82,10 @@ BiliFrame 是面向桌面端哔哩哔哩 HTML5 播放器的 Tampermonkey 用户�
 - `GM_download`：仅在预览窗口点击“下载截图”或“下载原图”后请求保存图片；远程下载域限制为 `hdslb.com` 及其子域名。
 - `GM_openInTab`：仅在点击“打开原图”后以前台标签页打开封面。
 - `GM_setClipboard`：仅在点击复制操作后写入图片地址或当前时间链接。
+- `GM_getValue` / `GM_setValue`：仅保存一个图片文件名模板字符串。
+- `GM_registerMenuCommand` / `GM_unregisterMenuCommand`：仅管理图片文件名设置入口。
 
-BiliFrame 不包含统计、遥测、Cookie、账号数据或后台网络请求，不读取私有 Bilibili API、凭据或页面全局私密数据。除用户主动触发的封面打开/下载等行为外，不主动联网。脚本本身无运行时依赖，项目开发检查仅使用 Node.js 内置测试运行器。
+BiliFrame 不包含统计、遥测、Cookie、账号数据或后台网络请求；除上述一个本地文件名模板外，不存储用户或账号数据，也不读取私有 Bilibili API、凭据或页面全局私密数据。除用户主动触发的封面打开/下载等行为外，不主动联网。脚本本身无运行时依赖，项目开发检查仅使用 Node.js 内置测试运行器。
 
 ## 限制
 

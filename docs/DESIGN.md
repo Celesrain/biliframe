@@ -10,20 +10,14 @@
 
 The name is short enough for GitHub and package metadata while describing the project's central capability: frame-level controls for Bilibili.
 
-## Observed Bilibili contract (2026-09-06)
+## Bilibili compatibility contract
 
-The implementation is based on a live desktop video page rather than a copied static example:
-
-- Page family: `https://www.bilibili.com/video/<BV id>`
-- Player root: `#bilibili-player`
-- Active media: an HTML `<video>` inside `.bpx-player-video-wrap`
-- Control row: `.bpx-player-control-bottom`
-- Left insertion group: `.bpx-player-control-bottom-left`
-- Stable semantic anchor: `[aria-label="播放/暂停"]`
-- Native button shape: `.bpx-player-ctrl-btn`, 36px wide in the observed 732px control row
-- Cover source: `meta[property="og:image"]`; the observed URL ended in a Bilibili `@1200w_630h` processing suffix
-
-Selectors are treated as an ordered adapter, not a single hard dependency. Semantic and legacy fallbacks are kept together, and a mutation observer remounts the controls after Bilibili replaces the player DOM.
+The adapter targets desktop playback pages such as `https://www.bilibili.com/video/<BV id>`.
+It uses ordered semantic and legacy fallbacks for `#bilibili-player`, the active `<video>` in
+`.bpx-player-video-wrap`, `.bpx-player-control-bottom`,
+`.bpx-player-control-bottom-left`, and `[aria-label="播放/暂停"]`. A mutation observer remounts
+controls after player replacement. These are compatibility contracts, not a guarantee of any
+particular live page layout.
 
 ## Supported page families
 
@@ -81,6 +75,22 @@ Cover resolution order:
 
 Bilibili's trailing `@...` image transformation is removed only from recognized image-path suffixes. Query strings and ordinary `@` characters are preserved.
 
+### Image filename templates
+
+Screenshot and cover downloads use one user-editable template. The supported placeholders are
+`{{title}}`, `{{bvid}}`, `{{timestamp}}`, `{{date}}`, `{{time}}`, and `{{kind}}`.
+The `{{kind}}` value is `frame` for screenshots and `cover` for original covers.
+The resolver substitutes missing values with safe fallbacks, strips filesystem-illegal
+characters, prevents empty or reserved Windows names, and appends the image extension rather
+than allowing a template to choose an unsafe extension. The default template preserves the
+existing title plus video-identity naming behavior.
+
+The Tampermonkey menu exposes the template editor and a restore-default action. Settings use the
+userscript manager's storage adapter (`GM_getValue`/`GM_setValue`) when available; if storage or
+menu APIs are unavailable, BiliFrame keeps the default template and safely degrades instead of
+failing image capture. A saved change applies to later downloads in the current session
+immediately.
+
 Clicking either image control first opens a visible preview and performs no download, tab opening, or clipboard write. Bootstrap captures the granted `GM_download`, `GM_openInTab`, and `GM_setClipboard` functions from the userscript sandbox explicitly instead of assuming that they are properties of the page window. Cover download is user-triggered through `GM_download` and limited by metadata to `hdslb.com` (including its subdomains). If the userscript manager cannot download directly, BiliFrame can open the original image so the browser can save it normally.
 
 Current-frame capture draws the displayed video frame to a canvas at `videoWidth × videoHeight`, shows the resulting PNG in the shared preview, and downloads it only after the user clicks Download screenshot. The filename uses the title plus BV/episode identity. Cross-origin/canvas failures are reported visibly instead of silently doing nothing.
@@ -96,10 +106,12 @@ Current-frame capture draws the displayed video frame to a canvas at `videoWidth
 
 ## Privacy and permissions
 
-- No analytics, telemetry, cookies, storage, account data, or background network requests.
+- No analytics, telemetry, cookies, account data, or background network requests. Apart from one local filename template string, no user or account data is stored.
 - `GM_download` is used only after the user clicks Download screenshot or Download original in a preview; callbacks update the preview with completion or a concrete manager/browser failure.
 - `GM_setClipboard` is used only after the user clicks a copy action.
 - `GM_openInTab` is used only after the user clicks Open original and requests an active child tab.
+- `GM_getValue` and `GM_setValue` store only the single filename template string.
+- `GM_registerMenuCommand` and `GM_unregisterMenuCommand` only create and remove the filename-settings menu entry.
 - No page globals, credentials, or private Bilibili APIs are read.
 
 ## Explicit exclusions
