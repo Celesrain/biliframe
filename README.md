@@ -4,7 +4,7 @@ BiliFrame 是面向桌面端哔哩哔哩 HTML5 播放器的 Tampermonkey 用户�
 
 > 本项目主要由 GPT 完成，并经过人工审查。
 
-项目名为 **BiliFrame**，仓库名为 `biliframe`，当前版本为 `0.1.2`。源代码与发行版发布于 [Celesrain/biliframe](https://github.com/Celesrain/biliframe)。
+项目名为 **BiliFrame**，仓库名为 `biliframe`，当前版本为 `0.1.3`。源代码与发行版发布于 [Celesrain/biliframe](https://github.com/Celesrain/biliframe)。
 
 ## 功能
 

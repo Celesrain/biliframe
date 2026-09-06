@@ -46,7 +46,7 @@ Four icon buttons are inserted immediately after the native play/pause button:
 3. Current-frame PNG capture
 4. Cover preview
 
-The buttons reuse the native control class and dimensions, but all custom styling is namespaced under `bili-frame-*`. Each button has `role="button"`, `tabindex="0"`, an `aria-label`, a descriptive title, and keyboard activation for Enter/Space. Only the previous/next-frame titles advertise shortcuts; capture and cover are direct-click controls.
+The buttons reuse the native control class and width, but all custom styling is namespaced under `bili-frame-*`. BiliFrame does not fix the button height: the shared native class remains responsible for normal/fullscreen sizing, while block-level SVG flex items stay centered without an inline baseline offset. Each button has `role="button"`, `tabindex="0"`, an `aria-label`, a descriptive title, and keyboard activation for Enter/Space. Only the previous/next-frame titles advertise shortcuts; capture and cover are direct-click controls.
 
 A small status pill reports pause/seek time and measured FPS. Both image controls use a keyboard-dismissible, preview-first native `<dialog>` opened with `showModal()`, placing the preview in the browser top layer even when the player is fullscreen. A non-dialog fallback retains compatibility with older engines. Image-action outcomes are also rendered inside the preview so they remain visible there. The current-frame modal provides Download screenshot and Copy current-time URL; the cover modal provides:
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BiliFrame - 哔哩哔哩逐帧与截图工具
 // @namespace    https://github.com/Celesrain/biliframe
-// @version      0.1.2
+// @version      0.1.3
 // @description  为哔哩哔哩播放器添加逐帧前进/后退、当前帧截图和原始封面查看下载功能。
 // @author       Celesrain
 // @license      MIT
@@ -824,10 +824,10 @@
     const style = document.createElement('style');
     style.id = 'bili-frame-styles';
     style.textContent = `
-.bili-frame-control { width:36px; height:22px; min-width:30px; padding:0; border:0; background:transparent; color:#fff; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:background-color .15s ease,opacity .15s ease; }
+.bili-frame-control { width:36px; min-width:30px; padding:0; border:0; background:transparent; color:#fff; display:inline-flex; align-items:center; justify-content:center; line-height:0; vertical-align:middle; cursor:pointer; transition:background-color .15s ease,opacity .15s ease; }
 .bili-frame-control:hover, .bili-frame-control:focus-visible { background:rgba(255,255,255,.16); outline:none; }
 .bili-frame-control:disabled { opacity:.45; cursor:default; }
-.bili-frame-icon { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.35; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+.bili-frame-icon { display:block; flex:none; width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.35; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
 .bili-frame-status { position:fixed; z-index:2147483646; right:16px; bottom:64px; max-width: min(360px, calc(100vw - 32px)); padding:6px 10px; border-radius:999px; color:#fff; background:rgba(20,20,24,.88); font:12px/1.4 sans-serif; pointer-events:none; }
 .bili-frame-status-success { background:rgba(24,120,70,.92); } .bili-frame-status-error { background:rgba(170,45,45,.94); }
 .bili-frame-modal { position:fixed; inset:0; z-index:2147483645; box-sizing:border-box; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100vw; max-width:none; height:100vh; max-height:none; margin:0; padding:24px; border:0; background:rgba(0,0,0,.72); color:#fff; }

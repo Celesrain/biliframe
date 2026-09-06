@@ -560,7 +560,12 @@ test('styles and controls are namespaced, idempotent, accessible, and icon-backe
   assert.equal(first, second);
   assert.equal(fixture.document.documentElement.querySelectorAll('#bili-frame-styles').length, 1);
   assert.match(first.textContent, /\.bili-frame-control/);
+  const controlRule = first.textContent.match(/\.bili-frame-control\s*\{([^}]*)\}/s)?.[1] || '';
+  assert.doesNotMatch(controlRule, /(?:^|;)\s*height\s*:/);
+  assert.match(controlRule, /line-height:\s*0/);
+  assert.match(controlRule, /vertical-align:\s*middle/);
   assert.match(first.textContent, /\.bili-frame-icon\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
+  assert.match(first.textContent, /\.bili-frame-icon\s*\{[^}]*display:\s*block;[^}]*flex:\s*none;/s);
   assert.match(first.textContent, /prefers-reduced-motion/);
   assert.match(first.textContent, /\.bili-frame-modal::backdrop/);
   assert.doesNotMatch(first.textContent, /(^|\n)\s*\.bpx-player/);

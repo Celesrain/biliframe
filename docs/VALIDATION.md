@@ -8,7 +8,7 @@
 - [x] `npm test`；日期：2026-09-06；结果：通过，40/40 测试通过，0 失败。
 - [x] `npm run verify`；日期：2026-09-06；结果：通过；依次完成 `npm run check` 与 `npm test`，40/40 测试通过。
 - [x] `git add -N -- .; git diff --check; git reset -- .`；日期：2026-09-06；结果：通过；包含未跟踪新增文件的 diff 检查无空白错误，随后已安全取消暂存且未丢弃改动。
-- [x] 用户脚本元数据；日期：2026-09-06；结果：通过；`@name` 为 `BiliFrame - 哔哩哔哩逐帧与截图工具`，namespace 为 `https://github.com/Celesrain/biliframe`，version 为 `0.1.2`，author 为 `Celesrain`，license 为 `MIT`；恰有 5 个 desktop `@match`（video、bangumi/play、medialist/play、list/watchlater、festival），恰有 3 个 grants（`GM_download`、`GM_openInTab`、`GM_setClipboard`），恰有 `@connect hdslb.com`，`@run-at` 为 `document-start`。
+- [x] 用户脚本元数据；日期：2026-09-06；结果：通过；`@name` 为 `BiliFrame - 哔哩哔哩逐帧与截图工具`，namespace 为 `https://github.com/Celesrain/biliframe`，version 为 `0.1.3`，author 为 `Celesrain`，license 为 `MIT`；恰有 5 个 desktop `@match`（video、bangumi/play、medialist/play、list/watchlater、festival），恰有 3 个 grants（`GM_download`、`GM_openInTab`、`GM_setClipboard`），恰有 `@connect hdslb.com`，`@run-at` 为 `document-start`。
 - [x] 风险关键词与选择器审计；日期：2026-09-06；结果：通过；在 `src/` 中未发现 `fetch`、`XMLHttpRequest`、`WebSocket`、`sendBeacon`、analytics/telemetry、cookie、localStorage、unsafeWindow、`eval`、TODO/FIXME；仅有预期的 `GM_*` 用户触发适配器。样式规则均使用 `bili-frame-` 命名空间；播放器/媒体查询使用 DESIGN 记录的原生选择器。未发现宽泛 `@connect`。
 
 自动化边界：上述检查覆盖 Node 语法、Node/UI 集成测试、用户脚本元数据、静态网络/全局/样式审计；未安装或执行用户脚本，也未验证真实浏览器、Bilibili 页面、Tampermonkey API 或 live DOM。
@@ -101,3 +101,13 @@
 - [x] 原生全屏视觉检查；结果：通过；本地页先调用 `requestFullscreen()`，随后真实源码通过 `<dialog>.showModal()` 在顶层显示 `1280×720` 图像、文件名、下载/复制/关闭按钮；点击模拟复制后，预览内显示“已复制当前时间链接”。
 
 验证边界：全屏视觉检查确认浏览器顶层和界面反馈，不执行真实下载或剪贴板写入；Tampermonkey 授权 API 的真实现场行为仍属于第 4 节验收范围。
+
+## 10. v0.1.3 全屏图标对齐修复（2026-09-06）
+
+- [x] 回归测试先行；结果：旧样式因 `.bili-frame-control` 固定 `height:22px` 而失败，证明其会覆盖播放器全屏按钮的响应式高度。
+- [x] 自适应高度；结果：通过；移除自定义按钮固定高度，保留原生 `.bpx-player-ctrl-btn` 对普通/全屏尺寸的控制。
+- [x] SVG 对齐；结果：通过；图标使用 `display:block`、`flex:none`，按钮使用 `line-height:0` 与 `vertical-align:middle`，消除行内 SVG 基线偏移。
+- [x] 浏览器视觉与几何检查；结果：通过；本地测试页模拟控制栏由 `35px`/按钮 `22px` 切换为全屏 `56px`/按钮 `36px`，普通和原生全屏下自定义图标与原生播放图标的中心线差值均为 `0.00px`。
+- [x] `npm run verify`；结果：通过；语法检查与完整测试套件均通过，43/43 测试通过，0 失败。
+
+验证边界：对真实 Bilibili 页面进行只读复查时遭遇站点 412 风控，因此本节以此前记录的真实控制栏结构和加载真实 userscript 源码的响应式浏览器测试页为依据；仍需安装 v0.1.3 后在实际播放器全屏场景完成用户验收。
