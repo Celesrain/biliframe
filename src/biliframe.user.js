@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BiliFrame - 哔哩哔哩逐帧与截图工具
 // @namespace    https://github.com/Celesrain/biliframe
-// @version      0.2.0
+// @version      0.2.1
 // @description  为哔哩哔哩播放器添加逐帧控制、预览式截图/封面下载和可自定义图片文件名功能。
 // @author       Celesrain
 // @license      MIT
@@ -259,6 +259,40 @@
     return false;
   }
 
+  function isFullscreenPlayerState(adapter, document) {
+    const player = adapter?.player;
+    if (!player) return false;
+
+    const stateNodes = [player];
+    if (player.querySelectorAll) {
+      stateNodes.push(...player.querySelectorAll('.bpx-player-container, #bilibili-player'));
+    }
+    for (const node of stateNodes) {
+      const screen = node.getAttribute?.('data-screen');
+      if (screen === 'web' || screen === 'full') return true;
+
+      const className = String(node.className || '');
+      if (className.split(/\s+/).some((name) => name === 'mode-webscreen' || name === 'mode-fullscreen')) {
+        return true;
+      }
+    }
+
+    return [document?.fullscreenElement, document?.webkitFullscreenElement].some(
+      (fullscreenElement) => fullscreenElement &&
+        (isDescendant(fullscreenElement, player) || isDescendant(player, fullscreenElement)),
+    );
+  }
+
+  function syncFullscreenControlState(adapter, controls, document) {
+    const fullscreen = isFullscreenPlayerState(adapter, document);
+    for (const control of controls || []) {
+      if (!control?.setAttribute) continue;
+      if (fullscreen) control.setAttribute('data-bili-frame-fullscreen', 'true');
+      else control.removeAttribute?.('data-bili-frame-fullscreen');
+    }
+    return fullscreen;
+  }
+
   function findPlayerAdapter(document) {
     if (!document?.querySelectorAll) return null;
 
@@ -277,6 +311,22 @@
       if (!playButton || !isDescendant(playButton, controlGroup)) continue;
 
       return { player, controlGroup, playButton };
+    }
+    return null;
+  }
+
+  function findNativeNextButton(controlGroup) {
+    if (!controlGroup?.querySelector) return null;
+
+    const selectors = [
+      '.bpx-player-ctrl-next',
+      '.bilibili-player-video-btn-next',
+      '[aria-label="下一个"]',
+      '[title="下一个"]',
+    ];
+    for (const selector of selectors) {
+      const candidate = controlGroup.querySelector(selector);
+      if (candidate && isDescendant(candidate, controlGroup)) return candidate;
     }
     return null;
   }
@@ -309,7 +359,9 @@
       return { controls: [] };
     }
 
-    const host = adapter.playButton.parentNode;
+    const nativeNext = findNativeNextButton(adapter.controlGroup);
+    const host = nativeNext?.parentNode || adapter.playButton.parentNode;
+    if (!host?.insertBefore) return { controls: [] };
     const existing = host.querySelectorAll?.('[data-bili-frame-control]') || [];
     if (existing.length === 4) {
       return { controls: Array.from(existing) };
@@ -322,15 +374,14 @@
       ['cover', '查看视频封面', '', '<rect x="2.5" y="2.5" width="19" height="19" rx="2.5"/><circle cx="8.5" cy="8.5" r="2"/><path d="m3.5 18 5-5 3.5 3.5 2.5-2.5 6 5"/>'],
     ];
     const controls = definitions.map(([actionName, label, shortcut, icon]) => {
-      const control = host.ownerDocument.createElement('button');
+      const control = host.ownerDocument.createElement('div');
       control.className = `bpx-player-ctrl-btn bili-frame-control bili-frame-${actionName}`;
-      control.setAttribute('type', 'button');
       control.setAttribute('data-bili-frame-control', actionName);
       control.setAttribute('role', 'button');
       control.setAttribute('tabindex', '0');
       control.setAttribute('aria-label', label);
       control.setAttribute('title', shortcut ? `${label}（${shortcut}）` : label);
-      control.innerHTML = `<svg class="bili-frame-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icon}</svg>`;
+      control.innerHTML = `<div class="bpx-player-ctrl-btn-icon bili-frame-icon-wrap" aria-hidden="true"><svg class="bili-frame-icon" viewBox="0 0 24 24" focusable="false">${icon}</svg></div>`;
 
       const invoke = (event) => {
         event.stopPropagation();
@@ -350,7 +401,7 @@
       return control;
     });
 
-    let reference = adapter.playButton.nextSibling || null;
+    let reference = nativeNext?.nextSibling || null;
     controls.forEach((control) => {
       host.insertBefore(control, reference);
       reference = control.nextSibling || null;
@@ -996,10 +1047,13 @@
     const style = document.createElement('style');
     style.id = 'bili-frame-styles';
     style.textContent = `
-.bili-frame-control { width:36px; min-width:30px; padding:0; border:0; background:transparent; color:#fff; display:inline-flex; align-items:center; justify-content:center; line-height:0; vertical-align:middle; cursor:pointer; transition:background-color .15s ease,opacity .15s ease; }
-.bili-frame-control:hover, .bili-frame-control:focus-visible { background:rgba(255,255,255,.16); outline:none; }
+.bili-frame-control { display:block; position:relative; line-height:22px; width:36px; min-width:30px; height:22px; box-sizing:border-box; padding:0; border:0; background:transparent; color:#fff; cursor:pointer; transition:opacity .15s ease; }
+.bili-frame-control:hover, .bili-frame-control:focus-visible, .bili-frame-control:active { background:transparent; outline:none; }
+.bili-frame-control:hover .bili-frame-icon, .bili-frame-control:focus-visible .bili-frame-icon, .bili-frame-control:active .bili-frame-icon { color:#00aeec; filter:drop-shadow(0 0 3px rgba(0,174,236,.55)); }
 .bili-frame-control:disabled { opacity:.45; cursor:default; }
-.bili-frame-icon { display:block; flex:none; width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2.35; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+.bili-frame-icon-wrap { width:100%; height:100%; display:flex; align-items:center; justify-content:center; line-height:0; pointer-events:none; }
+.bili-frame-icon { display:block; flex:none; width:22px; height:22px; transform:none; color:inherit; filter:none; transition:color .15s ease, filter .15s ease; fill:none; stroke:currentColor; stroke-width:2.35; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+.bili-frame-control[data-bili-frame-fullscreen="true"] .bili-frame-icon { transform:translateY(-5px); }
 .bili-frame-status { position:fixed; z-index:2147483646; right:16px; bottom:64px; max-width: min(360px, calc(100vw - 32px)); padding:6px 10px; border-radius:999px; color:#fff; background:rgba(20,20,24,.88); font:12px/1.4 sans-serif; pointer-events:none; }
 .bili-frame-status-success { background:rgba(24,120,70,.92); } .bili-frame-status-error { background:rgba(170,45,45,.94); }
 .bili-frame-modal { position:fixed; inset:0; z-index:2147483645; box-sizing:border-box; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100vw; max-width:none; height:100vh; max-height:none; margin:0; padding:24px; border:0; background:rgba(0,0,0,.72); color:#fff; }
@@ -1027,7 +1081,7 @@
 .bili-frame-modal-action { min-height:32px; padding:6px 12px; border:1px solid rgba(255,255,255,.35); border-radius:4px; color:#fff; background:rgba(255,255,255,.1); cursor:pointer; }
 .bili-frame-modal-action:hover, .bili-frame-modal-action:focus-visible { background:rgba(255,255,255,.22); outline:2px solid currentColor; outline-offset:2px; }
 @media (max-width:560px) { .bili-frame-control { width:30px; min-width:30px; } .bili-frame-icon { width:20px; height:20px; } .bili-frame-modal { padding:12px; } }
-@media (prefers-reduced-motion: reduce) { .bili-frame-control { transition:none; } }
+@media (prefers-reduced-motion: reduce) { .bili-frame-control, .bili-frame-icon { transition:none; } }
 @media (min-width:900px) { .bili-frame-modal-content { max-width:min(80vw,1400px); } }
 @media (display-mode: fullscreen) { .bili-frame-status { bottom:80px; } }
 `;
@@ -1129,6 +1183,7 @@
         capture: mediaActions.capture,
         cover: mediaActions.cover,
       });
+      syncFullscreenControlState(adapter, mounted.controls, document);
       return mounted;
     };
 
@@ -1185,7 +1240,16 @@
       patchHistory();
       if (observerFactory) {
         observer = new observerFactory(() => schedule());
-        observer.observe(document?.documentElement || document, { childList: true, subtree: true });
+        observer.observe(document?.documentElement || document, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'data-screen'],
+        });
+      }
+      if (document?.addEventListener) {
+        document.addEventListener('fullscreenchange', schedule);
+        document.addEventListener('webkitfullscreenchange', schedule);
       }
       schedule();
     };
@@ -1199,6 +1263,10 @@
         root.removeEventListener('popstate', schedule);
         root.removeEventListener('hashchange', schedule);
         root.removeEventListener('keydown', onShortcut);
+      }
+      if (document?.removeEventListener) {
+        document.removeEventListener('fullscreenchange', schedule);
+        document.removeEventListener('webkitfullscreenchange', schedule);
       }
       historyRestore?.();
       frameClock.unbind();
@@ -1250,11 +1318,13 @@
     findPlayerAdapter,
     isEditableTarget,
     mountControls,
+    isFullscreenPlayerState,
     normalizeCoverUrl,
     parseFrameRate,
     resolveCoverUrl,
     ensureStyles,
     sanitizeFilename,
     shouldHandleShortcut,
+    syncFullscreenControlState,
   };
 });

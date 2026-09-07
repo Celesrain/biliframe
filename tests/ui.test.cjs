@@ -21,7 +21,23 @@ const {
   createMediaActions,
   createLifecycleController,
   ensureStyles,
+  isFullscreenPlayerState,
+  syncFullscreenControlState,
 } = require('../src/biliframe.user.js');
+
+// The fixture DOM intentionally keeps the native tree small; expose the browser
+// sibling primitive needed to exercise insertion order against real controls.
+const fakeElementPrototype = Object.getPrototypeOf(createDom().document.createElement('div'));
+if (!Object.getOwnPropertyDescriptor(fakeElementPrototype, 'nextSibling')) {
+  Object.defineProperty(fakeElementPrototype, 'nextSibling', {
+    configurable: true,
+    get() {
+      const siblings = this.parentNode?.children || [];
+      const index = siblings.indexOf(this);
+      return index >= 0 ? siblings[index + 1] || null : null;
+    },
+  });
+}
 
 function playerFixture({ legacy = false } = {}) {
   const { document } = createDom();
@@ -43,6 +59,34 @@ function playerFixture({ legacy = false } = {}) {
   return { document, player, videoWrap, controls, left, play };
 }
 
+function appendNativeNextButton(fixture, variant = 'modern') {
+  const next = fixture.document.createElement('button');
+  if (variant === 'modern') next.className = 'bpx-player-ctrl-next';
+  if (variant === 'legacy') next.className = 'bilibili-player-video-btn-next';
+  if (variant === 'aria') next.setAttribute('aria-label', '下一个');
+  if (variant === 'title') next.setAttribute('title', '下一个');
+  fixture.left.appendChild(next);
+  return next;
+}
+
+function replaceControlBar(fixture, { legacy = false, nextVariant = 'modern' } = {}) {
+  const controls = fixture.document.createElement('div');
+  controls.className = legacy ? 'bilibili-player-video-control-bottom' : 'bpx-player-control-bottom';
+  const left = fixture.document.createElement('div');
+  left.className = legacy ? 'bilibili-player-video-control-bottom-left' : 'bpx-player-control-bottom-left';
+  const play = fixture.document.createElement('button');
+  play.className = legacy ? 'bilibili-player-video-btn-start' : 'bpx-player-ctrl-btn';
+  play.setAttribute('aria-label', legacy ? '播放' : '播放/暂停');
+  left.appendChild(play);
+  controls.appendChild(left);
+  fixture.player.removeChild(fixture.controls);
+  fixture.player.appendChild(controls);
+  fixture.controls = controls;
+  fixture.left = left;
+  fixture.play = play;
+  return appendNativeNextButton(fixture, nextVariant);
+}
+
 test('adapter prefers modern semantic anchors and supports one legacy fallback', () => {
   const modern = playerFixture();
   const adapter = findPlayerAdapter(modern.document);
@@ -53,6 +97,64 @@ test('adapter prefers modern semantic anchors and supports one legacy fallback',
   const fallback = findPlayerAdapter(legacy.document);
   assert.equal(fallback.controlGroup, legacy.controls);
   assert.equal(fallback.playButton, legacy.play);
+});
+
+test('fullscreen state recognizes modern, legacy, and document fullscreen signals', () => {
+  const fixture = playerFixture();
+  const adapter = findPlayerAdapter(fixture.document);
+  fixture.player.className = 'bpx-player-container';
+
+  for (const state of ['web', 'full']) {
+    fixture.player.setAttribute('data-screen', state);
+    assert.equal(isFullscreenPlayerState(adapter, fixture.document), true, `modern ${state}`);
+  }
+  for (const state of ['normal', 'wide', 'mini']) {
+    fixture.player.setAttribute('data-screen', state);
+    assert.equal(isFullscreenPlayerState(adapter, fixture.document), false, `modern ${state}`);
+  }
+
+  fixture.player.removeAttribute('data-screen');
+  fixture.player.className = 'mode-webscreen';
+  assert.equal(isFullscreenPlayerState(adapter, fixture.document), true);
+  fixture.player.className = 'mode-fullscreen';
+  assert.equal(isFullscreenPlayerState(adapter, fixture.document), true);
+  fixture.player.className = '';
+
+  const nestedFullscreenNode = fixture.document.createElement('div');
+  fixture.player.appendChild(nestedFullscreenNode);
+  fixture.document.fullscreenElement = nestedFullscreenNode;
+  assert.equal(isFullscreenPlayerState(adapter, fixture.document), true);
+  fixture.document.fullscreenElement = null;
+  const fullscreenAncestor = fixture.document.createElement('div');
+  fixture.document.body.appendChild(fullscreenAncestor);
+  fullscreenAncestor.appendChild(fixture.player);
+  fixture.document.webkitFullscreenElement = fullscreenAncestor;
+  assert.equal(isFullscreenPlayerState(adapter, fixture.document), true);
+  fixture.document.webkitFullscreenElement = null;
+  assert.equal(isFullscreenPlayerState(adapter, fixture.document), false);
+});
+
+test('fullscreen control state is synchronized idempotently and clears in normal playback', () => {
+  const fixture = playerFixture();
+  const adapter = findPlayerAdapter(fixture.document);
+  const controls = mountControls(adapter, {}).controls;
+  fixture.player.className = 'bpx-player-container';
+  fixture.player.setAttribute('data-screen', 'web');
+
+  assert.equal(syncFullscreenControlState(adapter, controls, fixture.document), true);
+  assert.ok(controls.every((control) => control.getAttribute('data-bili-frame-fullscreen') === 'true'));
+  const firstAttributes = controls.map((control) => control.getAttribute('data-bili-frame-fullscreen'));
+  assert.equal(syncFullscreenControlState(adapter, controls, fixture.document), true);
+  assert.deepEqual(
+    controls.map((control) => control.getAttribute('data-bili-frame-fullscreen')),
+    firstAttributes,
+  );
+
+  fixture.player.setAttribute('data-screen', 'normal');
+  assert.equal(syncFullscreenControlState(adapter, controls, fixture.document), false);
+  assert.ok(controls.every((control) => control.getAttribute('data-bili-frame-fullscreen') === null));
+  assert.equal(syncFullscreenControlState(adapter, controls, fixture.document), false);
+  assert.ok(controls.every((control) => control.getAttribute('data-bili-frame-fullscreen') === null));
 });
 
 test('active video is the visible, ready, largest candidate inside the player', () => {
@@ -80,8 +182,12 @@ test('mount inserts four accessible controls in order and is idempotent', () => 
     ['上一帧', '下一帧', '截取当前画面', '查看视频封面'],
   );
   result.controls.forEach((control) => {
+    assert.equal(control.tagName, 'DIV');
+    assert.equal(control.getAttribute('type'), null);
     assert.equal(control.getAttribute('role'), 'button');
     assert.equal(control.getAttribute('tabindex'), '0');
+    assert.match(control.innerHTML, /bpx-player-ctrl-btn-icon bili-frame-icon-wrap/);
+    assert.match(control.innerHTML, /bpx-player-ctrl-btn-icon bili-frame-icon-wrap[\s\S]*<svg/);
   });
   assert.equal(result.controls[0].getAttribute('title'), '上一帧（Alt+,）');
   assert.equal(result.controls[1].getAttribute('title'), '下一帧（Alt+.）');
@@ -92,6 +198,66 @@ test('mount inserts four accessible controls in order and is idempotent', () => 
   assert.deepEqual(fixture.left.children.slice(1), result.controls);
   assert.equal(mountControls(findPlayerAdapter(fixture.document), actions).controls.length, 4);
   assert.equal(fixture.left.children.length, 5);
+});
+
+test('mount appends controls after the modern native next button', () => {
+  const fixture = playerFixture();
+  const next = appendNativeNextButton(fixture, 'modern');
+  const mounted = mountControls(findPlayerAdapter(fixture.document), {}).controls;
+  assert.deepEqual(fixture.left.children, [fixture.play, next, ...mounted]);
+});
+
+test('mount appends controls after the legacy native next button', () => {
+  const fixture = playerFixture({ legacy: true });
+  const next = appendNativeNextButton(fixture, 'legacy');
+  const mounted = mountControls(findPlayerAdapter(fixture.document), {}).controls;
+  assert.deepEqual(fixture.left.children, [fixture.play, next, ...mounted]);
+});
+
+test('mount uses semantic next-button labels as fallback anchors', () => {
+  for (const variant of ['aria', 'title']) {
+    const fixture = playerFixture();
+    const next = appendNativeNextButton(fixture, variant);
+    const mounted = mountControls(findPlayerAdapter(fixture.document), {}).controls;
+    assert.deepEqual(fixture.left.children, [fixture.play, next, ...mounted], variant);
+  }
+});
+
+test('mount still places controls directly after play when no native next exists', () => {
+  const fixture = playerFixture();
+  const mounted = mountControls(findPlayerAdapter(fixture.document), {}).controls;
+  assert.deepEqual(fixture.left.children, [fixture.play, ...mounted]);
+});
+
+test('repeated mount preserves an already-correct next-button order without duplication or reordering', () => {
+  const fixture = playerFixture();
+  const next = appendNativeNextButton(fixture, 'modern');
+  const first = mountControls(findPlayerAdapter(fixture.document), {}).controls;
+  const firstOrder = [...fixture.left.children];
+  const second = mountControls(findPlayerAdapter(fixture.document), {}).controls;
+  assert.deepEqual(second, first);
+  assert.deepEqual(fixture.left.children, firstOrder);
+  assert.deepEqual(fixture.left.children, [fixture.play, next, ...first]);
+});
+
+test('lifecycle mounts after a replacement control group next button during SPA updates', () => {
+  const fixture = playerFixture();
+  const video = fixture.document.createElement('video');
+  Object.assign(video, { readyState: 4, duration: 2, currentTime: 1, clientWidth: 640, clientHeight: 360, pause() {} });
+  fixture.videoWrap.appendChild(video);
+  const harness = lifecycleHarness(fixture);
+  harness.controller.start();
+  harness.runTimer();
+  assert.deepEqual(fixture.left.children.map((node) => node.getAttribute('aria-label')), [
+    '播放/暂停', '上一帧', '下一帧', '截取当前画面', '查看视频封面',
+  ]);
+
+  replaceControlBar(fixture, { nextVariant: 'modern' });
+  harness.getObserverCallback()([{ type: 'childList', target: fixture.player }]);
+  harness.runTimer();
+  const labels = fixture.left.children.map((node) => node.getAttribute('aria-label'));
+  assert.deepEqual(labels, ['播放/暂停', null, '上一帧', '下一帧', '截取当前画面', '查看视频封面']);
+  assert.equal(fixture.left.children[1].className, 'bpx-player-ctrl-next');
 });
 
 test('controls activate on click, Enter, and Space while stopping propagation', () => {
@@ -719,7 +885,43 @@ test('lifecycle controller debounces, mounts once, handles SPA events and cleans
   assert.equal(listeners.size, 0);
 });
 
-test('styles and controls are namespaced, idempotent, accessible, and icon-backed', () => {
+test('lifecycle keeps fullscreen control state synchronized across startup, mutations, and fullscreen events', () => {
+  const fixture = playerFixture();
+  const video = fixture.document.createElement('video');
+  Object.assign(video, { readyState: 4, duration: 2, currentTime: 1, clientWidth: 640, clientHeight: 360, pause() {} });
+  fixture.videoWrap.appendChild(video);
+  const harness = lifecycleHarness(fixture);
+  harness.controller.start();
+  harness.runTimer();
+  const controls = harness.controller.getMounted().controls;
+  assert.ok(controls.every((control) => control.getAttribute('data-bili-frame-fullscreen') === null));
+  assert.equal(harness.getObserverOptions().attributes, true);
+  assert.deepEqual(
+    [...(harness.getObserverOptions().attributeFilter || [])].sort(),
+    ['class', 'data-screen'],
+  );
+
+  fixture.player.className = 'bpx-player-container';
+  fixture.player.setAttribute('data-screen', 'web');
+  harness.getObserverCallback()([{ type: 'attributes', target: fixture.player, attributeName: 'data-screen' }]);
+  harness.runTimer();
+  assert.ok(controls.every((control) => control.getAttribute('data-bili-frame-fullscreen') === 'true'));
+
+  fixture.player.setAttribute('data-screen', 'normal');
+  fixture.document.dispatchEvent(new FakeEvent('fullscreenchange'));
+  harness.runTimer();
+  assert.ok(controls.every((control) => control.getAttribute('data-bili-frame-fullscreen') === null));
+
+  fixture.document.webkitFullscreenElement = fixture.player;
+  fixture.document.dispatchEvent(new FakeEvent('webkitfullscreenchange'));
+  harness.runTimer();
+  assert.ok(controls.every((control) => control.getAttribute('data-bili-frame-fullscreen') === 'true'));
+  harness.controller.destroy();
+  assert.equal((fixture.document.listeners.get('fullscreenchange') || []).length, 0);
+  assert.equal((fixture.document.listeners.get('webkitfullscreenchange') || []).length, 0);
+});
+
+test('controls keep the native DOM layout and optically align inner icons to the native play glyph, not the control box', () => {
   const fixture = playerFixture();
   const first = ensureStyles(fixture.document);
   const second = ensureStyles(fixture.document);
@@ -727,16 +929,90 @@ test('styles and controls are namespaced, idempotent, accessible, and icon-backe
   assert.equal(fixture.document.documentElement.querySelectorAll('#bili-frame-styles').length, 1);
   assert.match(first.textContent, /\.bili-frame-control/);
   const controlRule = first.textContent.match(/\.bili-frame-control\s*\{([^}]*)\}/s)?.[1] || '';
-  assert.doesNotMatch(controlRule, /(?:^|;)\s*height\s*:/);
-  assert.match(controlRule, /line-height:\s*0/);
-  assert.match(controlRule, /vertical-align:\s*middle/);
-  assert.match(first.textContent, /\.bili-frame-icon\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;/s);
-  assert.match(first.textContent, /\.bili-frame-icon\s*\{[^}]*display:\s*block;[^}]*flex:\s*none;/s);
+  // Native play controls are block-level, position-relative 22px rows. The
+  // wrapper owns centering so fullscreen rules can resize the outer row while
+  // preserving the same icon centerline as the native play button.
+  assert.match(controlRule, /(?:^|;)\s*height\s*:\s*22px\s*(?:;|$)/);
+  assert.match(controlRule, /(?:^|;)\s*display\s*:\s*block\s*(?:;|$)/);
+  assert.match(controlRule, /(?:^|;)\s*position\s*:\s*relative\s*(?:;|$)/);
+  assert.match(controlRule, /(?:^|;)\s*line-height\s*:\s*22px\s*(?:;|$)/);
+  assert.doesNotMatch(controlRule, /(?:^|;)\s*(?:display\s*:\s*inline-flex|align-items|justify-content|align-self|transform|top|margin(?:-(?:top|bottom))?)\s*:/);
+  const wrapperRule = first.textContent.match(/\.bili-frame-icon-wrap\s*\{([^}]*)\}/s)?.[1] || '';
+  assert.match(wrapperRule, /(?:^|;)\s*width\s*:\s*100%\s*(?:;|$)/);
+  assert.match(wrapperRule, /(?:^|;)\s*height\s*:\s*100%\s*(?:;|$)/);
+  assert.match(wrapperRule, /(?:^|;)\s*display\s*:\s*flex\s*(?:;|$)/);
+  assert.match(wrapperRule, /(?:^|;)\s*align-items\s*:\s*center\s*(?:;|$)/);
+  assert.match(wrapperRule, /(?:^|;)\s*justify-content\s*:\s*center\s*(?:;|$)/);
+  assert.match(wrapperRule, /(?:^|;)\s*line-height\s*:\s*0\s*(?:;|$)/);
+  assert.doesNotMatch(wrapperRule, /(?:^|;)\s*transform\s*:/);
+  const cssRules = [...first.textContent.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map((match) => ({ selector: match[1].trim(), body: match[2] }));
+  const iconRule = cssRules.find(({ selector }) => selector === '.bili-frame-icon')?.body || '';
+  assert.match(iconRule, /(?:^|;)\s*width\s*:\s*22px\s*(?:;|$)/);
+  assert.match(iconRule, /(?:^|;)\s*height\s*:\s*22px\s*(?:;|$)/);
+  // Normal playback remains geometrically centered. The optical correction is
+  // scoped to the two fullscreen modes below, so wide/mini layouts inherit no
+  // vertical offset either.
+  const opticalCorrection = iconRule.match(/(?:^|;)\s*transform\s*:\s*([^;}]*)/)?.[1].trim() || '';
+  assert.equal(opticalCorrection, 'none');
+  const fullscreenIconRules = cssRules.filter(({ body }) => /(?:^|;)\s*transform\s*:\s*translateY\(-5px\)\s*(?:;|$)/.test(body));
+  assert.equal(fullscreenIconRules.length, 1);
+  const fullscreenIconSelector = fullscreenIconRules[0].selector;
+  assert.match(fullscreenIconSelector, /\.bili-frame-control\[data-bili-frame-fullscreen="true"\]\s+\.bili-frame-icon/);
+  assert.doesNotMatch(fullscreenIconSelector, /\.bpx-player-container|:fullscreen|:-webkit-full-screen|mode-(?:webscreen|fullscreen)/);
+  assert.doesNotMatch(fullscreenIconSelector, /@media|max-width|min-width|display-mode/);
+  const narrowScreenRule = first.textContent.match(/@media\s*\(max-width:560px\)\s*\{([^}]*)\}/s)?.[1] || '';
+  assert.doesNotMatch(narrowScreenRule, /\.bili-frame-icon\s*\{[^}]*transform\s*:/s);
   assert.match(first.textContent, /prefers-reduced-motion/);
   assert.match(first.textContent, /\.bili-frame-modal::backdrop/);
   assert.doesNotMatch(first.textContent, /(^|\n)\s*\.bpx-player/);
   const controls = mountControls(findPlayerAdapter(fixture.document), {}).controls;
   assert.ok(controls.every((control) => control.innerHTML.includes('<svg')));
+});
+
+test('interactive controls keep a transparent outer surface and highlight only the icon', () => {
+  const fixture = playerFixture();
+  const style = ensureStyles(fixture.document);
+  const cssRules = [...style.textContent.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map((match) => ({ selector: match[1].trim(), body: match[2] }));
+  const interactionStates = ['hover', 'focus-visible', 'active'];
+
+  for (const state of interactionStates) {
+    const controlRules = cssRules.filter(({ selector }) =>
+      new RegExp(`\\.bili-frame-control:${state}(?:\\s|,|$)`).test(selector));
+    assert.ok(controlRules.length > 0, `missing control :${state} rule`);
+    assert.ok(
+      controlRules.some(({ body }) => /(?:^|;)\s*background\s*:\s*transparent\s*(?:;|$)/.test(body)),
+      `control :${state} must keep a transparent background`,
+    );
+    assert.ok(
+      controlRules.every(({ body }) => !/background\s*:[^;}]*rgba\s*\(/i.test(body)),
+      `control :${state} must not use an rgba background`,
+    );
+    assert.ok(
+      controlRules.every(({ body }) => !/(?:^|;)\s*transform\s*:/.test(body)),
+      `control :${state} must not alter the fullscreen transform`,
+    );
+
+    const iconRules = cssRules.filter(({ selector }) =>
+      new RegExp(`\\.bili-frame-control:${state}[^{}]*\\.bili-frame-icon(?:\\s|,|$)`).test(selector));
+    assert.ok(iconRules.length > 0, `missing descendant icon :${state} rule`);
+    assert.ok(
+      iconRules.some(({ body }) => /(?:^|;)\s*color\s*:\s*#00aeec\s*(?:;|$)/i.test(body)),
+      `icon :${state} must use Bilibili blue`,
+    );
+    assert.ok(
+      iconRules.some(({ body }) => /filter\s*:[^;}]*drop-shadow\s*\(/i.test(body)),
+      `icon :${state} must have a drop-shadow highlight`,
+    );
+    assert.ok(
+      iconRules.every(({ body }) => !/(?:^|;)\s*transform\s*:/.test(body)),
+      `icon :${state} must not override the fullscreen transform`,
+    );
+  }
+
+  const iconRule = cssRules.find(({ selector }) => selector === '.bili-frame-icon')?.body || '';
+  assert.match(iconRule, /transition\s*:[^;}]*color[^;}]*filter/i);
 });
 
 test('lifecycle control clicks open visible frame and cover previews with default status', () => {
@@ -826,9 +1102,10 @@ function lifecycleHarness(fixture, options = {}) {
   let pending = null;
   let timerCount = 0;
   let observerCallback = null;
+  let observerOptions = null;
   class TestObserver {
     constructor(callback) { observerCallback = callback; }
-    observe() {}
+    observe(_target, observeOptions) { observerOptions = observeOptions; }
     disconnect() { observerCallback = null; }
   }
   const history = { pushState() {}, replaceState() {} };
@@ -857,6 +1134,7 @@ function lifecycleHarness(fixture, options = {}) {
     runTimer: () => { const callback = pending; pending = null; callback?.(); },
     getTimerCount: () => timerCount,
     getObserverCallback: () => observerCallback,
+    getObserverOptions: () => observerOptions,
   };
 }
 

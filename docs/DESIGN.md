@@ -33,14 +33,18 @@ The adapter only mounts when both an active video element and a recognized playe
 
 ## User interface
 
-Four icon buttons are inserted immediately after the native play/pause button:
+Four icon buttons are inserted immediately after the native “next” button when
+that button exists; otherwise they fall back to immediately after the native
+play/pause button:
 
 1. Previous frame
 2. Next frame
 3. Current-frame PNG capture
 4. Cover preview
 
-The buttons reuse the native control class and width, but all custom styling is namespaced under `bili-frame-*`. BiliFrame does not fix the button height: the shared native class remains responsible for normal/fullscreen sizing, while block-level SVG flex items stay centered without an inline baseline offset. Each button has `role="button"`, `tabindex="0"`, an `aria-label`, a descriptive title, and keyboard activation for Enter/Space. Only the previous/next-frame titles advertise shortcuts; capture and cover are direct-click controls.
+The buttons reuse the native control width, but all custom styling is namespaced under `bili-frame-*`. The fullscreen drift was caused by a structural mismatch: BiliFrame originally used a `button` whose SVG was its direct child, while Bilibili's native controls use a `div` control row with a nested `bpx-player-ctrl-btn-icon` wrapper. In the bottom-left flex row, that mismatch interacted with the row's sizing and stretch rules, moving the custom SVG center below the native play-button centerline. BiliFrame now mirrors the native structure: each control is a `div` with a nested icon wrapper, and the wrapper owns 100%-by-100% flex centering. The normal playback icon has no optical translation; only the inner SVG receives the user-confirmed `transform: translateY(-5px)` correction while the player is in webpage fullscreen or screen fullscreen. A lifecycle-owned `data-bili-frame-fullscreen="true"` attribute is synchronized on every custom control from modern `data-screen="web"`/`"full"` state, legacy fullscreen mode classes, and native `fullscreenElement`/`webkitFullscreenElement` containment. This keeps normal, wide, and mini playback at zero offset and avoids unstable site-ancestor CSS selectors while aligning the fullscreen icon with the native play glyph. The outer control and wrapper remain at zero offset. The outer control is a block-level, position-relative 22px row with a 22px line-height fallback; no top, margin, inline-flex, or outer flex-alignment compensation is used. Each control has `role="button"`, `tabindex="0"`, an `aria-label`, a descriptive title, and keyboard activation for Enter/Space. Only the previous/next-frame titles advertise shortcuts; capture and cover are direct-click controls.
+
+Interaction feedback keeps the control surface transparent in hover, focus, and active states; no background highlight is applied to the selected control. Instead, the descendant icon changes to Bilibili blue (`#00aeec`) with a subtle drop shadow, and color/filter transitions are disabled under `prefers-reduced-motion: reduce`. This preserves the native-looking control row while keeping keyboard focus visible through the icon itself.
 
 A small status pill reports pause/seek time and measured FPS. Both image controls use a keyboard-dismissible, preview-first native `<dialog>` opened with `showModal()`, placing the preview in the browser top layer even when the player is fullscreen. A non-dialog fallback retains compatibility with older engines. Image-action outcomes are also rendered inside the preview so they remain visible there. The current-frame modal provides Download screenshot and Copy current-time URL; the cover modal provides:
 
